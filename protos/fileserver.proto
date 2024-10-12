@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package fileserver;
+
+service FileServerService {
+  rpc GetFile (GetRequest) returns (stream GetResponse);
+  rpc Upload (stream FileChunk) returns (UploadStatus);
+}
+
+message GetRequest {
+  string file_name = 1;
+  int64 chunk_size = 2;
+}
+
+message GetResponse {
+  bool exists = 1;
+  FileChunk chunk = 2;
+}
+
+message FileChunk {
+  bytes content = 1;
+  string file_name = 2;
+  int64 file_size = 3;
+  int32 ttl=4;
+  string metadata = 5;
+  int32 created_date = 6;
+}
+
+message UploadStatus {
+  bool success = 1;
+}

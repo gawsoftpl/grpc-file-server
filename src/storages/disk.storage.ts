@@ -7,6 +7,8 @@ import * as Fs from 'fs/promises'
 import { existsSync, ReadStream, mkdirSync, Stats, createWriteStream, WriteStream, createReadStream } from 'fs'
 import * as path from 'path'
 import {emptyChunk} from "../helpers/emptyChunk";
+import {RpcException} from "@nestjs/microservices";
+import { status } from '@grpc/grpc-js'
 
 interface DiskStorageMetadata {
     metadata: string
@@ -17,12 +19,16 @@ interface DiskStorageMetadata {
 export class DiskStorage implements StorageInterface, OnModuleInit {
 
     private maxMemory: number;
+    private defaultTtl: number;
+    private readChunkSize: number
     private dirPath: string
     private logs: Logger = new Logger(DiskStorage.name)
 
     constructor(
         private configService: ConfigService
     ) {
+        this.readChunkSize = configService.get('storages.disk.read_chunk_size')
+        this.defaultTtl = configService.get('storages.disk.ttl')
         this.dirPath = configService.get('storages.disk.path')
         this.maxMemory = configService.get('storages.disk.max_memory')
     }
@@ -31,7 +37,24 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
         await this.createDir()
     }
 
-    async exists(filePath: string): Promise<boolean> {
+    exists(fileName: string) {
+        return new Observable<boolean>(subscriber => {
+            try{
+                (async() => {
+                    const fileDir = await this.fileDir(fileName)
+                    const filePath = this.filePath(fileDir, fileName)
+                    const exists = await this.fileExists(filePath)
+                    subscriber.next(exists)
+                    subscriber.complete()
+                })()
+            }catch(err){
+                subscriber.error(err)
+            }
+
+        })
+    }
+
+    async fileExists(filePath: string): Promise<boolean> {
         try{
             await Fs.access(filePath)
             return true;
@@ -50,32 +73,31 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
         let stream: ReadStream
         return new Observable((subscriber) => {
             (async() => {
-
-                const fileDir = await this.fileDir(payload.file_name)
-                const filePath = `${this.filePath(fileDir, payload.file_name)}.bin`
-                const filePathMetadata = `${this.filePath(fileDir, payload.file_name)}.metadata`
-
-                let fileStat: Stats;
-                try {
-                    fileStat = await Fs.stat(filePath);
-                }catch(err){
-                    this.logs.debug(err);
-                    subscriber.next({
-                        exists: false,
-                        chunk: emptyChunk(payload.file_name)
-                    })
-                    subscriber.complete()
-                }
-
                 try{
+                    const fileDir = await this.fileDir(payload.file_name)
+                    const filePath = `${this.filePath(fileDir, payload.file_name)}.bin`
+                    const filePathMetadata = `${this.filePath(fileDir, payload.file_name)}.metadata`
+
+                    let fileStat: Stats;
+                    try {
+                        fileStat = await Fs.stat(filePath);
+                    }catch(err){
+                        this.logs.debug(err);
+                        subscriber.next({
+                            exists: false,
+                            chunk: emptyChunk(payload.file_name)
+                        })
+                        subscriber.complete()
+                    }
+
 
                     const fileMetadata = (await Fs.readFile(filePathMetadata)).toString();
                     const metadata: DiskStorageMetadata = JSON.parse(fileMetadata)
 
+                    console.log(this.getReadChunkSize(payload))
                     if (!stream)
                         stream = createReadStream(filePath, {
-                            highWaterMark: payload.chunk_size,
-
+                            highWaterMark: this.getReadChunkSize(payload),
                         });
 
                     let streamIndex = 0;
@@ -87,7 +109,7 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
                             file_name: payload.file_name,
                             file_size: fileStat.size,
                             metadata: metadata.metadata,
-                            created_date: fileStat.mtime.getTime(),
+                            created_date: fileStat.mtime.getTime() / 1000,
                         } : emptyChunk(payload.file_name)
 
                         subscriber.next({
@@ -109,8 +131,10 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
                     });
 
                 }catch (error){
-                    this.logs.error(error)
-                    subscriber.error(error)
+                    subscriber.error(new RpcException({
+                        message: error.message,
+                        code: status.INVALID_ARGUMENT
+                    }))
                 }
             })();
         })
@@ -129,13 +153,11 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
                     const fileDir = await this.fileDir(chunk.file_name, true)
                     const filePath = `${this.filePath(fileDir, chunk.file_name)}.bin`
 
-                    if (chunk.metadata) {
+                    if (!stream) {
                         const metadataFilePath = `${this.filePath(fileDir, chunk.file_name)}.metadata`
                         await this.saveMetadata(metadataFilePath, chunk)
-                    }
-
-                    if (!stream)
                         stream = createWriteStream(filePath);
+                    }
 
                     savedChunks.push(new Promise<boolean>((resolve, reject) => {
                         stream.write(chunk.content, (err) => {
@@ -170,12 +192,24 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
     protected async saveMetadata(filePath: string, file: FileChunk): Promise<void>
     {
         const metadata: DiskStorageMetadata = {
-            ttl: file.ttl,
-            metadata: file.metadata
+            ttl: file?.ttl ?? this.defaultTtl,
+            metadata: file?.metadata ?? ""
         }
+
         await Fs.writeFile(filePath, JSON.stringify(metadata))
     }
 
+
+    protected getReadChunkSize(payload: GetRequest)
+    {
+        if (
+            !isNaN(payload.chunk_size)
+            && payload.chunk_size > 1024
+        )
+            return payload.chunk_size;
+
+        return this.readChunkSize;
+    }
 
     protected filePath(fileDir: string, fileName: string): string
     {
@@ -192,7 +226,7 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
         }
 
         const dirPath = path.join(this.dirPath, `${fileName[0]}${fileName[1]}`)
-        const dirExists = await this.exists(dirPath);
+        const dirExists = await this.fileExists(dirPath);
 
         if (createDirs && !dirExists) {
             await Fs.mkdir(dirPath, {
@@ -238,4 +272,6 @@ export class DiskStorage implements StorageInterface, OnModuleInit {
             })
         })
     }
+
+
 }

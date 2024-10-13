@@ -1,12 +1,9 @@
 import { Controller } from '@nestjs/common';
-import { GrpcStreamMethod } from '@nestjs/microservices';
+import {GrpcMethod, GrpcStreamCall, GrpcStreamMethod} from '@nestjs/microservices';
 import { Observable, Subject } from 'rxjs';
 import { AppService } from './app.service';
 import {
-    ExistsRequest,
-    ExistsResponse,
-    FileChunk,
-    GetRequest,
+    FileChunk, GetRequest,
     GetResponse,
     UploadStatus
 } from "../interfaces/fileserver.interface";
@@ -15,82 +12,77 @@ import {
 export class AppController {
     constructor(private readonly appService: AppService) {}
 
-    @GrpcStreamMethod('FileServerService', 'Exists')
-    Exists(
-        data: Observable<ExistsRequest>,
-    ): Observable<ExistsResponse> {
-        const subject = new Subject<ExistsResponse>();
 
-        const onNext = (request: ExistsRequest) => {
-            subject.next(this.appService.exists(request));
-        };
-
-        const onComplete = () => subject.complete();
-
-        data.subscribe({
-            next: onNext,
-            complete: onComplete,
-            error: subject.error,
-        });
-
-        return subject.asObservable();
+    @GrpcMethod('FileServerService', 'GetFile')
+    getFile(request: GetRequest): Observable<GetResponse> {
+        return this.appService.getFile(request)
     }
 
-    @GrpcStreamMethod('FileServerService', 'GetFile')
-    GetFile(
-        data: Observable<GetRequest>,
-    ): Observable<GetResponse> {
-        const subject = new Subject<GetResponse>();
+    @GrpcStreamCall('FileServerService', 'Upload')
+    lotsOfGreetings(requestStream: any, callback: (err: unknown, value: UploadStatus) => void) {
 
-        const onNext = async (request: GetRequest) => {
-            try{
-                this.appService.get(request).subscribe({
-                    next: (data) => {
-                        subject.next(data)
-                    },
-                    error: (err) => {
-                        subject.error(err)
-                    },
-                })
-            }catch(err){
-                subject.error(err);
-            }
+        const subject = new Subject<FileChunk>()
+        this.appService.saveFile(subject.asObservable())
+            .subscribe({
+                next:( response)=>{
+                    callback(null, {
+                        success: response
+                    })
+                },
+                error: (err) => {
+                    callback(err, null)
+                }
+            })
 
-        }
-
-        const onComplete = () => subject.complete();
-        data.subscribe({
-            next: onNext,
-            complete: onComplete,
-            error: subject.error,
+        requestStream.on('data', (message: FileChunk) => {
+            subject.next(message)
         });
 
-        return subject.asObservable();
+        requestStream.on('end', () => callback(null, {
+            success: true
+        }));
     }
 
-    @GrpcStreamMethod('FileServerService', 'Upload')
-    upload(data: Observable<FileChunk>): Observable<UploadStatus> {
-        const subject = new Subject<UploadStatus>();
-        const onNext = async (request: FileChunk) => {
-            try{
-                subject.next({
-                    success: this.appService.store(request),
-                    file_name: request.file_name
-                })
-            }catch (err){
-                subject.error(err)
-            }
+    // @GrpcStreamMethod('FileServerService', 'GetFile')
+    // getFile(requestStream: any, callback: (err: unknown, value: GetResponse) => void)  {
+    //
+    //     requestStream.on('data', async(message: GetRequest) => {
+    //         const stream = await this.appService.getFile(message);
+    //         stream.subscribe({
+    //             next: (response) => {
+    //                 callback(null, response)
+    //             },
+    //             error: (err) => {
+    //                 callback(err, null)
+    //             }
+    //         })
+    //     })
+    //
+    // }
 
-        };
-
-        const onComplete = () => subject.complete();
-        data.subscribe({
-            next: onNext,
-            complete: onComplete,
-            error: subject.error,
-        });
-
-        return subject.asObservable();
-    }
+    // @GrpcStreamMethod('FileServerService', 'Upload')
+    // upload(data: Observable<FileChunk>): Observable<UploadStatus> {
+    //     const subject = new Subject<UploadStatus>();
+    //     const onNext = async (request: FileChunk) => {
+    //         try{
+    //             subject.next({
+    //                 success: this.appService.store(request),
+    //                 file_name: request.file_name
+    //             })
+    //         }catch (err){
+    //             subject.error(err)
+    //         }
+    //
+    //     };
+    //
+    //     const onComplete = () => subject.complete();
+    //     data.subscribe({
+    //         next: onNext,
+    //         complete: onComplete,
+    //         error: subject.error,
+    //     });
+    //
+    //     return subject.asObservable();
+    // }
 
 }

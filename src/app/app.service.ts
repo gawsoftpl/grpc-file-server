@@ -1,7 +1,7 @@
-import {Injectable, Logger} from "@nestjs/common";
+import {Inject, Injectable, Logger} from "@nestjs/common";
 import {FileChunk, GetRequest, GetResponse, UploadStatus} from "../interfaces/fileserver.interface";
 import {StorageInterface} from "../interfaces/storage.interface";
-import {tap, Observable, Subject, Subscription, switchMap} from "rxjs";
+import {tap, Observable, Subject, Subscription, switchMap, of} from "rxjs";
 
 @Injectable()
 export class AppService {
@@ -10,7 +10,9 @@ export class AppService {
     private sendToMemory: Subject<FileChunk>
 
     constructor(
+        @Inject('MemoryStorage')
         private memoryStorage: StorageInterface,
+        @Inject('DiskStorage')
         private diskStorage: StorageInterface
     ) {
         // Copy data from disk to memory
@@ -18,41 +20,32 @@ export class AppService {
         this.memoryStorage.save(this.sendToMemory.asObservable())
     }
 
-    saveFile(payload: Observable<FileChunk>): Observable<UploadStatus>
+    saveFile(payload: Observable<FileChunk>)
     {
-        const subject = new Subject<UploadStatus>()
-        this.diskStorage.save(payload).subscribe({
-            next: (saved) => {
-                subject.next({
-                    success: saved,
-                })
-            },
-            error: (err) => {
-                subject.error(err);
-            },
-            complete: () => {
-                subject.complete()
-            }
-        })
-
-        return subject.asObservable()
+        return this.diskStorage.save(payload)
     }
 
-    async getFile(payload: GetRequest): Promise<Observable<GetResponse>>
+    getFile(payload: GetRequest): Observable<GetResponse>
     {
-        if (await this.memoryStorage.exists(payload.file_name)){
-            return this.memoryStorage.get(payload)
-        }
+        return this.memoryStorage.exists(payload.file_name).pipe(
+            switchMap((memoryExists) => {
 
-        // Read data from disk
-        this.diskStorage.get(payload)
-             .pipe(
-                 tap(value => {
-                     if (value.exists && value.chunk){
-                         this.sendToMemory.next(value.chunk)
-                     }
-                 })
-             )
+                if (memoryExists) {
+                    this.logs.debug('Get file from memory')
+                    return this.memoryStorage.get(payload)
+                }
+                return this.diskStorage.get(payload)
+                    .pipe(
+                        tap(value => {
+
+                            if (value.exists && value.chunk){
+                                this.sendToMemory.next(value.chunk)
+                            }
+                        })
+                    )
+            })
+        )
+
     }
 
 }

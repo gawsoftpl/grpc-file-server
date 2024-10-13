@@ -5,6 +5,8 @@ import {AppService} from "./app/app.service";
 import {GrpcClientOptions} from "./grpc/grpc.options";
 import {AppController} from "./app/app.controller";
 import {HealthModule} from "./healthz/healthz.module";
+import {MemoryStorage} from "./storages/memory.storage";
+import {DiskStorage} from "./storages/disk.storage";
 
 @Module({})
 export class AppModule {
@@ -15,6 +17,14 @@ export class AppModule {
             providers: [
                 GrpcClientOptions,
                 AppService,
+                {
+                    provide: 'MemoryStorage',
+                    useClass: MemoryStorage
+                },
+                {
+                    provide: "DiskStorage",
+                    useClass: DiskStorage
+                }
             ],
             imports: [
                 ConfigModule.forRoot({

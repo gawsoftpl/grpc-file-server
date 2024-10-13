@@ -7,7 +7,12 @@ export const Config = {
         disk: {
             // Setup max memory in bytes, default 128MB
             max_memory: parseInt(process.env.STORAGE_DISK_MAX_SIZE || "16"),
-            path: process.env.STORAGE_DISK_PATH || '/tmp/storage'
+            path: process.env.STORAGE_DISK_PATH || '/tmp/storage',
+
+            read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "1024"),
+
+            // ttl in seconds
+            ttl: parseInt(process.env.STORAGE_TTL || '86400')
         }
     },
     garbageCollection: {

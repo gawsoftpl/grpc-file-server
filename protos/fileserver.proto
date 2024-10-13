@@ -3,29 +3,77 @@ syntax = "proto3";
 package fileserver;
 
 service FileServerService {
-  rpc GetFile (GetRequest) returns (stream GetResponse);
-  rpc Upload (stream FileChunk) returns (UploadStatus);
+  rpc GetFile (stream GetRequest) returns (stream GetResponse);
+  rpc Upload (stream UploadRequest) returns (stream UploadResponse);
 }
 
-message GetRequest {
-  string file_name = 1;
-  int64 chunk_size = 2;
+message UploadRequest {
+  oneof message {
+    RegisterUploadRequest register = 1;
+    FileChunkRequest chunk = 2;
+  }
 }
 
-message GetResponse {
-  bool exists = 1;
-  FileChunk chunk = 2;
-}
-
-message FileChunk {
-  bytes content = 1;
+message RegisterUploadRequest {
+  string request_id = 1;
   string file_name = 2;
   int64 file_size = 3;
   int32 ttl=4;
   string metadata = 5;
-  int32 created_date = 6;
 }
 
-message UploadStatus {
-  bool success = 1;
+message FileChunkRequest {
+  string upload_id = 1;
+  bytes content = 2;
+  bool last_chunk = 3;
 }
+
+message UploadResponse {
+  oneof message {
+    RegisterUploadResponse register = 1;
+    FileChunkResponse chunk = 2;
+    FileSaved saved = 3;
+  }
+}
+
+message RegisterUploadResponse {
+  string request_id = 1;
+  string upload_id = 2;
+}
+
+message FileChunkResponse {
+  string upload_id = 1;
+  bool success = 2;
+}
+
+message FileSaved {
+  string upload_id = 1;
+}
+
+message GetRequest {
+  string file_name = 1;
+  string request_id = 2;
+  int64 chunk_size = 3;
+}
+
+message GetResponse {
+  oneof message {
+      GetResponseFileInfo file = 1;
+      FileChunk chunk = 2;
+  }
+}
+message GetResponseFileInfo {
+  string request_id = 1;
+  bool exists = 2;
+  string metadata = 3;
+  int64 file_size = 4;
+}
+
+message FileChunk {
+  bytes content = 1;
+  string request_id = 2;
+  uint32 chunk_number = 3;
+  bool last_chunk = 4;
+}
+
+

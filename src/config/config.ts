@@ -9,7 +9,7 @@ export const Config = {
             max_memory: parseInt(process.env.STORAGE_DISK_MAX_SIZE || "134217728"), // default 128MB
             path: process.env.STORAGE_DISK_PATH || '/tmp/storage',
 
-            read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "1024"),
+            read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "65536"),
 
             // ttl in seconds
             ttl: parseInt(process.env.STORAGE_TTL || '86400')

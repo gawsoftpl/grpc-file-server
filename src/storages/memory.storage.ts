@@ -72,10 +72,11 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                     file.usageCounter++;
 
                     const parsedChunkSize = this.getReadChunkSize(chunkSize)
-
                     const chunks = Math.ceil(file.data.length / parsedChunkSize)
                     for(let i= 0;i<chunks; i++) {
                         const chunkOffset = parsedChunkSize * i;
+                        this.logs.debug(`Load from memory ${fileName} ${parsedChunkSize} bytes `)
+
                         observer.next({
                             exists: true,
                             file_size: file.data.length,
@@ -145,7 +146,7 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                         save_date: new Date().getTime() / 1000,
                         usageCounter: 0,
                         byteOffset: 0,
-                        lock: false,
+                        lock: true,
                         metadata: payload.metadata
                     })
                 }
@@ -154,7 +155,6 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                     throw new RpcException({message: 'No send content bytes', code: status.INVALID_ARGUMENT})
 
                 file = this.files.get(payload.file_name)
-                file.lock = true;
                 file.data = Buffer.concat([file.data, payload.content])
                 this.memory_size += file.data.length
 
@@ -226,7 +226,6 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
     protected removeItem(key: string): number
     {
         const item = this.files.get(key)
-        item.lock = true;
         const releasedMemory = item.data.length
         this.memory_size -= releasedMemory
         this.files.delete(key)

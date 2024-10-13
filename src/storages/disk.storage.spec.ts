@@ -57,12 +57,18 @@ describe("Test disk storage", () => {
             subscriber.complete()
         })
 
+        const savedFlags = []
         diskStorage.save(data)
             .subscribe({
                 next: (data) => {
-                    expect(data).toBe(true)
+                    savedFlags.push(data)
                 },
                 complete: () => {
+                    expect(savedFlags).toMatchObject([
+                        true,
+                        true,
+                        true
+                    ])
                     const name = "abc"
                     const fileChunks = []
                     diskStorage.load(

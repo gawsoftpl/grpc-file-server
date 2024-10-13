@@ -23,7 +23,7 @@ message RegisterUploadRequest {
 }
 
 message FileChunkRequest {
-  string upload_id = 1;
+  string request_id = 1;
   bytes content = 2;
   bool last_chunk = 3;
 }
@@ -38,16 +38,15 @@ message UploadResponse {
 
 message RegisterUploadResponse {
   string request_id = 1;
-  string upload_id = 2;
 }
 
 message FileChunkResponse {
-  string upload_id = 1;
+  string request_id = 1;
   bool success = 2;
 }
 
 message FileSaved {
-  string upload_id = 1;
+  string request_id = 1;
 }
 
 message GetRequest {

@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto'
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js'
 import {ConfigService} from "@nestjs/config";
+import {request} from "express";
 
 interface UploadStreamDataType {
     payload: RegisterUploadRequest,
@@ -77,7 +78,6 @@ export class AppService {
     upload(payload: UploadRequest, response: Subject<UploadResponse>): void
     {
         if (payload?.register) {
-            const id = randomUUID().toString()
 
             // Subject for send message to disk
             const subject = new Subject<SaveData>()
@@ -88,7 +88,7 @@ export class AppService {
                     next: (result) => {
                         response.next({
                             chunk: {
-                                upload_id: id,
+                                request_id: payload.register.request_id,
                                 success: result
                             }
                         })
@@ -96,7 +96,7 @@ export class AppService {
                     complete: () => {
                         response.next({
                             saved: {
-                                upload_id: id
+                                request_id: payload.register.request_id,
                             }
                         })
                     },
@@ -108,19 +108,18 @@ export class AppService {
                     }
                 })
 
-            this.uploadStreams.set(id, {
+            this.uploadStreams.set(payload.register.request_id, {
                 payload: payload.register,
                 subject: subject,
                 saved_date: Date.now()
             })
             response.next({
                 register: {
-                    upload_id: id,
-                    request_id: payload.register.request_id
+                    request_id: payload.register.request_id,
                 }
             })
         } else if(payload?.chunk) {
-            const uploadStream = this.uploadStreams.get(payload.chunk.upload_id)
+            const uploadStream = this.uploadStreams.get(payload.chunk.request_id)
             if (!uploadStream) {
                 response.error(new RpcException({
                     message: "Cant find upload stream",
@@ -138,7 +137,7 @@ export class AppService {
 
             if (payload.chunk.last_chunk){
                 uploadStream.subject.complete()
-                this.uploadStreams.delete(payload.chunk.upload_id)
+                this.uploadStreams.delete(payload.chunk.request_id)
             }
         }else{
             response.error(new RpcException({
@@ -153,14 +152,17 @@ export class AppService {
     getFile(payload: GetRequest, response: Subject<GetResponse>): void
     {
 
+        // Convert big int to string
+        const chunkSize = parseInt(payload.chunk_size.toString())
+
         this.memoryStorage.exists(payload.file_name).pipe(
             mergeMap((memoryExists) => {
                 if (memoryExists) {
                     this.logs.debug('Get file from memory')
-                    return this.memoryStorage.load(payload.file_name, payload.chunk_size)
+                    return this.memoryStorage.load(payload.file_name, chunkSize)
                 }
 
-                return this.diskStorage.load(payload.file_name, payload.chunk_size)
+                return this.diskStorage.load(payload.file_name, chunkSize)
                     .pipe(
                         tap(value => {
                             if (value.exists && value.content){

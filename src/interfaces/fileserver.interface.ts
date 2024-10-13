@@ -3,49 +3,93 @@ import { Metadata } from "@grpc/grpc-js";
 import { GrpcMethod, GrpcStreamMethod } from "@nestjs/microservices";
 import { Observable } from "rxjs";
 
-export interface GetRequest {
-  file_name: string;
-  chunk_size: number;
+export interface UploadRequest {
+  register?: RegisterUploadRequest | undefined;
+  chunk?: FileChunkRequest | undefined;
 }
 
-export interface GetResponse {
-  exists: boolean;
-  chunk: FileChunk | undefined;
-}
-
-export interface FileChunk {
-  content: Uint8Array;
+export interface RegisterUploadRequest {
+  request_id: string;
   file_name: string;
   file_size: number;
   ttl: number;
   metadata: string;
-  created_date: number;
 }
 
-export interface UploadStatus {
+export interface FileChunkRequest {
+  upload_id: string;
+  content: Uint8Array;
+  last_chunk: boolean;
+}
+
+export interface UploadResponse {
+  register?: RegisterUploadResponse | undefined;
+  chunk?: FileChunkResponse | undefined;
+  saved?: FileSaved | undefined;
+}
+
+export interface RegisterUploadResponse {
+  request_id: string;
+  upload_id: string;
+}
+
+export interface FileChunkResponse {
+  upload_id: string;
   success: boolean;
 }
 
-export interface FileServerServiceClient {
-  GetFile(request: GetRequest, metadata?: Metadata): Observable<GetResponse>;
+export interface FileSaved {
+  upload_id: string;
+}
 
-  Upload(request: Observable<FileChunk>, metadata?: Metadata): Observable<UploadStatus>;
+export interface GetRequest {
+  file_name: string;
+  request_id: string;
+  chunk_size: number;
+}
+
+export interface GetResponse {
+  file?: GetResponseFileInfo | undefined;
+  chunk?: FileChunk | undefined;
+  completed?: FileReadCompleted | undefined;
+}
+
+export interface GetResponseFileInfo {
+  request_id: string;
+  exists: boolean;
+  metadata: string;
+  file_size: number;
+}
+
+export interface FileChunk {
+  content: Uint8Array;
+  request_id: string;
+}
+
+export interface FileReadCompleted {
+  request_id: string;
+}
+
+export interface FileServerServiceClient {
+  GetFile(request: Observable<GetRequest>, metadata?: Metadata): Observable<GetResponse>;
+
+  Upload(request: Observable<UploadRequest>, metadata?: Metadata): Observable<UploadResponse>;
 }
 
 export interface FileServerServiceController {
-  GetFile(request: GetRequest, metadata?: Metadata): Observable<GetResponse>;
+  GetFile(request: Observable<GetRequest>, metadata?: Metadata): Observable<GetResponse>;
 
-  Upload(request: Observable<FileChunk>, metadata?: Metadata): Observable<UploadStatus>;
+  Upload(request: Observable<UploadRequest>, metadata?: Metadata): Observable<UploadResponse>;
 }
 
 export function FileServerServiceControllerMethods() {
   return function (constructor: Function) {
-    const grpcMethods: string[] = ["GetFile"];
+    const grpcMethods: string[] = [];
     for (const method of grpcMethods) {
       const descriptor: any = Reflect.getOwnPropertyDescriptor(constructor.prototype, method);
       GrpcMethod("FileServerService", method)(constructor.prototype[method], method, descriptor);
     }
-    const grpcStreamMethods: string[] = ["Upload"];
+    const grpcStreamMethods: string[] = ["GetFile", "Upload"];
     for (const method of grpcStreamMethods) {
       const descriptor: any = Reflect.getOwnPropertyDescriptor(constructor.prototype, method);
       GrpcStreamMethod("FileServerService", method)(constructor.prototype[method], method, descriptor);

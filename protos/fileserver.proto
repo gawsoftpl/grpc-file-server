@@ -60,6 +60,7 @@ message GetResponse {
   oneof message {
       GetResponseFileInfo file = 1;
       FileChunk chunk = 2;
+      FileReadCompleted completed = 3;
   }
 }
 message GetResponseFileInfo {
@@ -72,8 +73,10 @@ message GetResponseFileInfo {
 message FileChunk {
   bytes content = 1;
   string request_id = 2;
-  uint32 chunk_number = 3;
-  bool last_chunk = 4;
+}
+
+message FileReadCompleted {
+  string request_id = 1;
 }
 
 

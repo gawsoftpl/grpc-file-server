@@ -1,10 +1,8 @@
-import {FileChunk} from "../interfaces/fileserver.interface";
+import { GetResponseFileInfo} from "../interfaces/fileserver.interface";
 
-export const emptyChunk  = (fileName: string): FileChunk => ({
-    ttl: 0,
-    file_name: fileName,
-    content: null,
+export const emptyFileData  = (requestId: string): GetResponseFileInfo => ({
     file_size: 0,
-    created_date: 0,
+    exists: false,
+    request_id: requestId,
     metadata: "",
 })

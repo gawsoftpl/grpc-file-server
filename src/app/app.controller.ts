@@ -1,88 +1,50 @@
-import { Controller } from '@nestjs/common';
+import {Controller, Logger} from '@nestjs/common';
 import {GrpcMethod, GrpcStreamCall, GrpcStreamMethod} from '@nestjs/microservices';
 import { Observable, Subject } from 'rxjs';
 import { AppService } from './app.service';
 import {
     FileChunk, GetRequest,
-    GetResponse,
-    UploadStatus
+    GetResponse, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
 
 @Controller('')
 export class AppController {
-    constructor(private readonly appService: AppService) {}
 
+    private logs: Logger = new Logger(AppController.name)
 
-    @GrpcMethod('FileServerService', 'GetFile')
-    getFile(request: GetRequest): Observable<GetResponse> {
-        return this.appService.getFile(request)
-    }
+    constructor(
+        private readonly appService: AppService
+    ) {}
 
-    @GrpcStreamCall('FileServerService', 'Upload')
-    lotsOfGreetings(requestStream: any, callback: (err: unknown, value: UploadStatus) => void) {
+    @GrpcStreamMethod('FileServerService', 'GetFile')
+    GetFile(data: Observable<GetRequest>): Observable<GetResponse> {
+        const subject = new Subject<GetResponse>()
 
-        const subject = new Subject<FileChunk>()
-        this.appService.saveFile(subject.asObservable())
-            .subscribe({
-                next:( response)=>{
-                    callback(null, {
-                        success: response
-                    })
-                },
-                error: (err) => {
-                    callback(err, null)
-                }
-            })
-
-        requestStream.on('data', (message: FileChunk) => {
-            subject.next(message)
+        data.subscribe({
+            next: (item) => {
+                this.appService.getFile(item, subject)
+            },
+            complete: () => {
+                subject.complete()
+            },
         });
 
-        requestStream.on('end', () => callback(null, {
-            success: true
-        }));
+        return subject.asObservable();
     }
 
-    // @GrpcStreamMethod('FileServerService', 'GetFile')
-    // getFile(requestStream: any, callback: (err: unknown, value: GetResponse) => void)  {
-    //
-    //     requestStream.on('data', async(message: GetRequest) => {
-    //         const stream = await this.appService.getFile(message);
-    //         stream.subscribe({
-    //             next: (response) => {
-    //                 callback(null, response)
-    //             },
-    //             error: (err) => {
-    //                 callback(err, null)
-    //             }
-    //         })
-    //     })
-    //
-    // }
+    @GrpcStreamMethod('FileServerService', 'Upload')
+    upload(data: Observable<UploadRequest>): Observable<UploadResponse> {
+        const subject = new Subject<UploadResponse>()
 
-    // @GrpcStreamMethod('FileServerService', 'Upload')
-    // upload(data: Observable<FileChunk>): Observable<UploadStatus> {
-    //     const subject = new Subject<UploadStatus>();
-    //     const onNext = async (request: FileChunk) => {
-    //         try{
-    //             subject.next({
-    //                 success: this.appService.store(request),
-    //                 file_name: request.file_name
-    //             })
-    //         }catch (err){
-    //             subject.error(err)
-    //         }
-    //
-    //     };
-    //
-    //     const onComplete = () => subject.complete();
-    //     data.subscribe({
-    //         next: onNext,
-    //         complete: onComplete,
-    //         error: subject.error,
-    //     });
-    //
-    //     return subject.asObservable();
-    // }
+        const onComplete = () => subject.complete();
 
+        data.subscribe({
+            next: (item) => {
+                this.appService.upload(item, subject)
+            },
+            complete: onComplete,
+        });
+
+        return subject.asObservable();
+    }
 }

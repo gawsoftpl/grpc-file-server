@@ -3,7 +3,8 @@ import {Test} from "@nestjs/testing";
 import {ConfigModule} from "@nestjs/config";
 import {Config} from "../config/config";
 import {Observable} from "rxjs";
-import {FileChunk} from "../interfaces/fileserver.interface";
+import {SaveData} from "../interfaces/storage.interface";
+import { existsSync } from 'fs'
 
 describe("Test disk storage", () => {
 
@@ -30,23 +31,28 @@ describe("Test disk storage", () => {
             test: 123
         })
 
-        const data = new Observable<FileChunk>(subscriber => {
-            const payload = Buffer.from("abc2");
+        const data = new Observable<SaveData>(subscriber => {
+            const payload = Buffer.from("abc");
+            const payload2 = Buffer.from("abc2")
+            const payload3 = Buffer.from("abc3")
+
             subscriber.next({
                 content: new Uint8Array(payload),
-                ttl: 10,
+                ttl: 50,
                 metadata: metadata,
-                file_size: payload.length,
                 file_name: "abc",
-                created_date: 0
             })
             subscriber.next({
-                content: new Uint8Array(payload),
-                ttl: 0,
-                metadata: "",
-                file_size: payload.length,
+                content: new Uint8Array(payload2),
+                ttl: 50,
+                metadata: metadata,
                 file_name: "abc",
-                created_date: 0
+            })
+            subscriber.next({
+                content: new Uint8Array(payload3),
+                ttl: 50,
+                metadata: metadata,
+                file_name: "abc",
             })
             subscriber.complete()
         })
@@ -59,23 +65,22 @@ describe("Test disk storage", () => {
                 complete: () => {
                     const name = "abc"
                     const fileChunks = []
-                    diskStorage.get({
-                        file_name: name,
-                        chunk_size: 1024
-                    })
+                    diskStorage.load(
+                        name,
+                        1024
+                    )
                         .subscribe({
                             next: (chunk) => {
+
                                 if (fileChunks.length == 0){
-                                    expect(chunk.exists).toBe(true)
-                                    expect(chunk.chunk.ttl).toBe(10)
-                                    expect(chunk.chunk.metadata).toBe(metadata)
+                                    expect(chunk.metadata).toBe(metadata)
+                                    expect(chunk.file_size).toBe(11)
                                 }
-                                expect(chunk.chunk.file_name).toBe(name)
-                                fileChunks.push(chunk.chunk.content)
+                                fileChunks.push(chunk.content)
                             },
                             complete: () => {
                                 const payload = Buffer.concat(fileChunks).toString()
-                                expect(payload).toBe('abc2abc2')
+                                expect(payload).toBe('abcabc2abc3')
                                 done()
                             },
                             error: (err => {
@@ -88,7 +93,35 @@ describe("Test disk storage", () => {
                     done(err)
                 }
             })
+    })
 
 
+    it('Garbage collection', (done) => {
+        const data = new Observable<SaveData>(subscriber => {
+            const payload = Buffer.from("12345678910111213141516");
+            subscriber.next({
+                content: new Uint8Array(payload),
+                ttl: 1,
+                metadata: "",
+                file_name: "abc",
+            })
+            subscriber.complete()
+        })
+
+        diskStorage.save(data)
+            .subscribe({
+                next: (data) => {
+                    expect(data).toBe(true)
+                },
+                complete: async() => {
+                    setTimeout(async() => {
+                        diskStorage.garbageCollection().then(async() => {
+                            expect(existsSync('/tmp/storage/ab/abc.bin')).toBeFalsy()
+                            expect(existsSync('/tmp/storage/ab/abc.metadata')).toBeFalsy()
+                            done()
+                        })
+                    }, 2000)
+                },
+            })
     })
 })

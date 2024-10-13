@@ -1,9 +1,26 @@
 import { Observable } from "rxjs";
-import { FileChunk, GetRequest, GetResponse } from "./fileserver.interface";
+
+export interface SaveData {
+    file_name: string;
+    ttl: number;
+    metadata: string;
+    content: Uint8Array
+}
+
+export interface LoadData {
+    exists: boolean;
+    file_size: number;
+    metadata: string;
+    ttl: number
+    content: Uint8Array
+}
 
 export interface StorageInterface {
-    save(payload: Observable<FileChunk>): Observable<boolean>
+    save(chunkData: Observable<SaveData>): Observable<boolean>
+
     exists(fileName: string): Observable<boolean>
-    get(payload: GetRequest): Observable<GetResponse>
+
+    load(fileName: string, chunkSize: number): Observable<LoadData>
+
     garbageCollection(): Promise<void>
 }

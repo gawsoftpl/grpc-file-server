@@ -1,19 +1,18 @@
 import {Injectable, Logger} from "@nestjs/common";
-import {FileInterface, FileMemoryInterface} from "../interfaces/file.interface";
+import { FileMemoryInterface} from "../interfaces/file.interface";
 import {ConfigService} from "@nestjs/config";
-import { FileChunk, GetRequest, GetResponse} from "../interfaces/fileserver.interface";
 import {Observable, Subject} from "rxjs";
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js';
-import {StorageInterface} from "../interfaces/storage.interface";
-import {emptyChunk} from "../helpers/emptyChunk";
+import {LoadData, SaveData, StorageInterface} from "../interfaces/storage.interface";
+import {FileLockedException} from "../exceptions/FileLockedException";
+import {StorageAbstract} from "./storage.abstract";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-class CantFindElementException extends Error {}
 
 @Injectable()
-export class MemoryStorage implements StorageInterface {
+export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
     private files: Map<string, FileMemoryInterface>
     private logs: Logger = new Logger(MemoryStorage.name)
@@ -21,8 +20,9 @@ export class MemoryStorage implements StorageInterface {
     private max_memory: number
 
     constructor(
-        private configService: ConfigService
+        protected configService: ConfigService
     ) {
+        super(configService)
         this.files = new Map()
         this.memory_size = 0;
         this.max_memory = configService.get('storages.memory.max_memory');
@@ -36,23 +36,29 @@ export class MemoryStorage implements StorageInterface {
         })
     }
 
-    get(payload: GetRequest): Observable<GetResponse>
+    load(fileName: string, chunkSize: number): Observable<LoadData>
     {
-
-
         return new Observable(observer=> {
             (async() => {
                 let file: FileMemoryInterface;
                 try{
-                    file = this.files.get(payload.file_name);
+                    file = this.files.get(fileName);
 
-                    if (!file) {
-                        throw new CantFindElementException();
+                    if (!file || file.data.length == 0) {
+                        observer.next({
+                            content: new Uint8Array(),
+                            exists: false,
+                            metadata: "",
+                            file_size: 0,
+                            ttl: 0
+                        })
+                        observer.complete()
+                        return;
                     }
 
                     const timeout = setTimeout(() => {
                         this.logs.error('Timeout for file lock')
-                        throw new CantFindElementException();
+                        throw new FileLockedException();
                     }, 5000);
 
                     while(file.lock) {
@@ -64,38 +70,28 @@ export class MemoryStorage implements StorageInterface {
 
                     file.lock = true;
                     file.usageCounter++;
-                    const chunks = Math.ceil(file.data.byteLength / payload.chunk_size)
+
+                    const parsedChunkSize = this.getReadChunkSize(chunkSize)
+
+                    const chunks = Math.ceil(file.data.length / parsedChunkSize)
                     for(let i= 0;i<chunks; i++) {
-                        const chunkOffset = payload.chunk_size * i;
-
-                        const baseChunk = i == 0 ? {
-                            ttl: file.ttl,
-                            file_name: payload.file_name,
-                            file_size: file.data.byteLength,
-                            metadata: file.metadata,
-                            created_date: file.save_date,
-                        } : emptyChunk(payload.file_name)
-
+                        const chunkOffset = parsedChunkSize * i;
                         observer.next({
                             exists: true,
-                            chunk: {
-                                ...baseChunk,
-                                content: file.data.slice(chunkOffset, (chunkOffset + payload.chunk_size))
-                            }
+                            file_size: file.data.length,
+                            metadata: file.metadata,
+                            ttl: file.ttl,
+                            content: file.data.subarray(chunkOffset, (chunkOffset + parsedChunkSize))
                         })
                     }
 
                     observer.complete()
+
                 } catch(err) {
-                    if (err instanceof CantFindElementException) {
-                        observer.next({
-                            exists: false,
-                            chunk: emptyChunk(payload.file_name)
-                        })
-                        observer.complete()
-                        return
-                    }
-                    observer.error(err)
+                    observer.error(new RpcException({
+                        message: err.message,
+                        code: status.INTERNAL
+                    }))
                 } finally {
                     if(file)
                         file.lock = false;
@@ -105,14 +101,14 @@ export class MemoryStorage implements StorageInterface {
         })
     }
 
-    save(payload: Observable<FileChunk>): Observable<boolean>
+    save(chunkData: Observable<SaveData>): Observable<boolean>
     {
         const subject = new Subject<boolean>()
         const savedChunks: Array<boolean> = [];
 
-        payload.subscribe({
-            next: (chunk) => {
-                savedChunks.push(this.saveInMemory(chunk));
+        chunkData.subscribe({
+            next: async(chunk) => {
+                savedChunks.push(await this.saveInMemory(chunk));
             },
             complete: () => {
                 subject.next(savedChunks.every(item => item))
@@ -127,57 +123,52 @@ export class MemoryStorage implements StorageInterface {
 
     }
 
-    saveInMemory(payload: FileChunk): boolean
+    protected async saveInMemory(payload: SaveData): Promise<boolean>
     {
-        let file: FileMemoryInterface;
+        return new Promise((resolve, reject) => {
+            let file: FileMemoryInterface;
 
-        if (!payload?.file_name)
-            throw new RpcException({message: 'No send file_name', code: status.INVALID_ARGUMENT})
+            if (!payload?.file_name)
+                throw new RpcException({message: 'No send file_name', code: status.INVALID_ARGUMENT})
 
-        try {
-            const fileSize = Number(payload.file_size)
+            try {
+                const fileSize = Number(payload.content.byteLength)
 
-            if (fileSize + this.memory_size > this.max_memory) {
-                this.releaseMemory(payload.file_name, payload.file_size)
+                if (fileSize + this.memory_size > this.max_memory) {
+                    this.releaseMemory(payload.file_name, payload.content.byteLength)
+                }
+
+                if (!this.files.has(payload.file_name)) {
+                    this.files.set(payload.file_name, {
+                        data: Buffer.alloc(0),
+                        ttl: payload.ttl,
+                        save_date: new Date().getTime() / 1000,
+                        usageCounter: 0,
+                        byteOffset: 0,
+                        lock: false,
+                        metadata: payload.metadata
+                    })
+                }
+
+                if (!payload?.content)
+                    throw new RpcException({message: 'No send content bytes', code: status.INVALID_ARGUMENT})
+
+                file = this.files.get(payload.file_name)
+                file.lock = true;
+                file.data = Buffer.concat([file.data, payload.content])
+                this.memory_size += file.data.length
+
+                resolve(true)
+
+            }catch (err){
+                this.logs.error(err)
+                reject(err)
+            } finally {
+                if(file)
+                    file.lock = false;
             }
+        });
 
-            if (!this.files.has(payload.file_name)) {
-                this.files.set(payload.file_name, {
-                    data: new Uint8Array(fileSize),
-                    ttl: payload.ttl,
-                    save_date: new Date().getTime() / 1000,
-                    usageCounter: 0,
-                    byteOffset: 0,
-                    lock: false,
-                    metadata: payload.metadata
-                })
-            }
-
-            if (!payload?.content)
-                throw new RpcException({message: 'No send content bytes', code: status.INVALID_ARGUMENT})
-
-            file = this.files.get(payload.file_name)
-
-            if (file.byteOffset >= file.data.byteLength) {
-                this.logs.error(`You cant send file bigger that declared file size: ${file.data.byteLength}`)
-                return false;
-            }
-
-            file.lock = true;
-            file.data.set(payload.content, file.byteOffset)
-            this.memory_size += payload.content.byteLength
-            file.byteOffset += payload.content.byteLength
-
-            return true;
-        }catch (err){
-            this.logs.error(err)
-            throw new RpcException({message: err.message, code: status.INTERNAL})
-        } finally {
-            if(file)
-                file.lock = false;
-        }
-
-        return false;
     }
 
     protected releaseMemory(addingKey: string, bytesRequired: number) {
@@ -197,25 +188,54 @@ export class MemoryStorage implements StorageInterface {
     }
 
     async garbageCollection(): Promise<void>{
-        this.logs.debug("Garbage collection")
+        this.logs.log('Start disk garbage collection')
+        const now = new Date().getTime() / 1000
+        let candidatesForRemoval = [];
 
-        const actualDate = new Date().getTime()
         this.files.forEach((item, key) => {
-            if (item.save_date + item.ttl < actualDate) {
-                this.removeItem(key)
+            // Step 1: Remove expired items
+            if ((item.ttl + item.save_date) < now) {
+                this.memory_size -= item.data.length
+                this.files.delete(key);
+            } else {
+                candidatesForRemoval.push({ key, fileSize: item.data.length, ttl: item.ttl, usageCounter: item.usageCounter });
             }
-        })
+        });
+
+        // If buffer use min 60%
+        if (this.memory_size < (this.max_memory * 0.6))
+            return
+
+        candidatesForRemoval.sort((a, b) => {
+            if (a.usageCounter === b.usageCounter) {
+                return a.ttl - b.ttl; // If usage is the same, remove the one closest to expiration
+            }
+            return a.usageCounter - b.usageCounter; // Least used items should be removed first
+        });
+
+        // Let's assume we remove half of the least used or near-expiry items
+        const itemsToRemove = Math.ceil(candidatesForRemoval.length / 2);
+
+        for (let i = 0; i < itemsToRemove; i++) {
+            this.memory_size -= candidatesForRemoval[i].fileSize
+            this.files.delete(candidatesForRemoval[i].key);
+        }
+
     }
 
     protected removeItem(key: string): number
     {
         const item = this.files.get(key)
         item.lock = true;
-        const releasedMemory = item.data.byteLength
+        const releasedMemory = item.data.length
         this.memory_size -= releasedMemory
         this.files.delete(key)
         this.logs.debug(`Released item ${key}`)
         return releasedMemory
     }
 
+    setMaxMemory(size: number)
+    {
+        this.max_memory = size
+    }
 }

@@ -17,7 +17,7 @@ export interface RegisterUploadRequest {
 }
 
 export interface FileChunkRequest {
-  upload_id: string;
+  request_id: string;
   content: Uint8Array;
   last_chunk: boolean;
 }
@@ -30,16 +30,15 @@ export interface UploadResponse {
 
 export interface RegisterUploadResponse {
   request_id: string;
-  upload_id: string;
 }
 
 export interface FileChunkResponse {
-  upload_id: string;
+  request_id: string;
   success: boolean;
 }
 
 export interface FileSaved {
-  upload_id: string;
+  request_id: string;
 }
 
 export interface GetRequest {

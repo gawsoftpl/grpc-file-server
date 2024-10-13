@@ -10,11 +10,11 @@ export abstract class StorageAbstract {
         this.readChunkSize = configService.get('storages.disk.read_chunk_size')
     }
 
-    protected getReadChunkSize(chunkSize?: number )
+    protected getReadChunkSize(chunkSize?: number ): number
     {
         if (
             !isNaN(chunkSize)
-            && chunkSize > 1024
+            && chunkSize > 2
         )
             return chunkSize;
 

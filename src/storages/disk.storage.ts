@@ -143,11 +143,11 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
                     const fileMetadata = (await Fs.readFile(filePathMetadata)).toString();
                     const metadata: DiskStorageMetadata = JSON.parse(fileMetadata);
-
                     if (!stream)
                         stream = createReadStream(filePath, {
                             highWaterMark: this.getReadChunkSize(chunkSize),
                         });
+
 
                     let chunkIndex = 0;
                     stream.on('data', (chunk) => {
@@ -192,23 +192,36 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
     save(chunkData: Observable<SaveData>): Observable<boolean> {
 
         const subject = new Subject<boolean>();
-
         let stream: WriteStream;
+        let firstPromiseCompleted = false;
+        let fileInfo: SaveData
 
         const closeStream = () => {
             if (stream) stream.close()
         }
 
         const initStream = async(chunk: SaveData) => {
+            fileInfo = chunk
             const fileDir = await this.fileDir(chunk.file_name, true)
-            const filePath = `${this.filePath(fileDir, chunk.file_name)}.bin`
-            const metadataFilePath = `${this.filePath(fileDir, chunk.file_name)}.metadata`
+            const filePath = `${this.filePath(fileDir, chunk.file_name)}.bin.tmp`
+            const metadataFilePath = `${this.filePath(fileDir, chunk.file_name)}.metadata.tmp`
             await this.saveMetadata(metadataFilePath, chunk)
             stream = createWriteStream(filePath);
             return chunk
         };
 
-        let firstPromiseCompleted = false;
+        const commitStream = async() => {
+            const fileDir = await this.fileDir(fileInfo.file_name, true)
+            const filePath = `${this.filePath(fileDir, fileInfo.file_name)}.bin.tmp`
+            const metadataFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.metadata.tmp`
+            const commitFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.bin`
+            const commitMetadataFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.metadata`
+
+            await Fs.rename(metadataFilePath, commitMetadataFilePath)
+            await Fs.rename(filePath, commitFilePath)
+
+        };
+
         chunkData
             .pipe(
                 concatMap((val) => {
@@ -225,13 +238,15 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
             .subscribe({
                 next: (chunk) => {
                     stream.write(chunk.content)
+                    subject.next(true)
                 },
                 error: (err) => {
                     subject.error(err)
                     closeStream()
                 },
                 complete: () => {
-                    stream.end(() => {
+                    stream.end(async() => {
+                        await commitStream()
                         subject.complete()
                         closeStream()
                     })

@@ -28,9 +28,12 @@ export class MemoryStorage implements StorageInterface {
         this.max_memory = configService.get('storages.memory.max_memory');
     }
 
-    async exists(fileName: string): Promise<boolean>
+    exists(fileName: string)
     {
-        return this.files.has(fileName)
+        return new Observable<boolean>(subscriber =>  {
+            subscriber.next(this.files.has(fileName))
+            subscriber.complete()
+        })
     }
 
     get(payload: GetRequest): Observable<GetResponse>
@@ -142,7 +145,7 @@ export class MemoryStorage implements StorageInterface {
                 this.files.set(payload.file_name, {
                     data: new Uint8Array(fileSize),
                     ttl: payload.ttl,
-                    save_date: new Date().getTime(),
+                    save_date: new Date().getTime() / 1000,
                     usageCounter: 0,
                     byteOffset: 0,
                     lock: false,

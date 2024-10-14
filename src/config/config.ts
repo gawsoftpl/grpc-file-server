@@ -6,16 +6,19 @@ export const Config = {
         memory: {
             // Setup max memory in bytes, default 128MB
             max_memory: parseSize(process.env.STORAGE_MEMORY_MAX_SIZE || "128MB"), // default 128MB
+
+            // Default ttl per second
+            ttl: parseInt(process.env.STORAGE_MEMORY_TTL || '600')
         },
         disk: {
             // Setup max memory in bytes, default 128MB
-            max_memory: parseSize(process.env.STORAGE_DISK_MAX_SIZE || "4GB"), // default 4GB
+            max_memory: parseSize(process.env.STORAGE_DISK_MAX_SIZE || "1GB"), // default 4GB
             path: process.env.STORAGE_DISK_PATH || '/tmp/storage',
 
             read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "65536"),
 
             // ttl in seconds
-            ttl: parseInt(process.env.STORAGE_TTL || '600')
+            ttl: parseInt(process.env.STORAGE_DISK_TTL || '600')
 
         }
     },

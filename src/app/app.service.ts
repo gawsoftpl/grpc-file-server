@@ -6,12 +6,13 @@ import {
     RegisterUploadRequest, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
 import { SaveData, StorageInterface} from "../interfaces/storage.interface";
-import {tap, Subject, mergeMap, } from "rxjs";
+import {tap, Subject, mergeMap, first, concatMap, of, EMPTY,} from "rxjs";
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js'
 import {ConfigService} from "@nestjs/config";
 import {Counter, Gauge} from "prom-client";
 import {InjectMetric} from "@willsoto/nestjs-prometheus";
+import {FileMemoryInterface} from "../interfaces/file.interface";
 
 interface UploadStreamDataType {
     payload: RegisterUploadRequest,
@@ -27,7 +28,6 @@ interface GetStreamType {
 export class AppService {
 
     private logs: Logger = new Logger(AppService.name)
-    private sendToMemory: Subject<SaveData>
     private uploadStreams: Map<string, UploadStreamDataType>
     private getStreams: Map<string, GetStreamType>
     private upload_register_max_time: number
@@ -56,11 +56,9 @@ export class AppService {
         private configService: ConfigService
     ) {
         // Copy data from disk to memory
-        this.sendToMemory = new Subject()
         this.uploadStreams = new Map()
         this.getStreams = new Map()
         this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time')
-        this.memoryStorage.save(this.sendToMemory.asObservable())
 
         const garbageCollectionInterval = configService.get('garbageCollection.interval') * 1000
 
@@ -87,6 +85,7 @@ export class AppService {
         const now = Date.now()
         this.uploadStreams.forEach((item, key) => {
             if ((item.saved_date + this.upload_register_max_time) > now) {
+                item.subject.complete()
                 this.uploadStreams.delete(key)
             }
         })
@@ -182,7 +181,6 @@ export class AppService {
 
         // Convert big int to string
         const chunkSize = parseInt(payload.chunk_size.toString())
-
         this.memoryStorage.exists(payload.file_name).pipe(
             mergeMap((memoryExists) => {
                 if (memoryExists) {
@@ -192,33 +190,44 @@ export class AppService {
                         .pipe(tap(item => this.files_memory_downloaded_bytes.inc(item.content.length)))
                 }
 
-                return this.diskStorage.load(payload.file_name, chunkSize)
+                // Get data from hdd
+                const dataFromStorage = this.diskStorage.load(payload.file_name, chunkSize);
+
+                // Save hdd data in memory
+                const streamToMemory = new Subject<SaveData>()
+                this.memoryStorage.save(streamToMemory.asObservable())
+                dataFromStorage
                     .pipe(
-                        tap(value => {
-                            if (value.exists) {
-                                this.files_downloaded_bytes.inc(value.content.length)
-                                this.files_downloaded.inc()
-
-                                if (value.content){
-                                    this.sendToMemory.next({
-                                        file_name: payload.file_name,
-                                        content: value.content,
-                                        ttl: value.ttl,
-                                        metadata: ""
-                                    })
-                                }
+                        concatMap((val) => {
+                            if (val.exists) {
+                                return of(val)
                             }
-
+                            return EMPTY
                         })
                     )
+                    .subscribe({
+                        next: (chunk) => streamToMemory.next({
+                            file_name: payload.file_name,
+                            metadata: chunk.metadata,
+                            ttl: chunk.ttl,
+                            content: chunk.content
+                        }),
+                        complete: () => streamToMemory.complete(),
+                        error: (e) => streamToMemory.error(e)
+                    })
+
+                return dataFromStorage
             })
         ).subscribe({
             next: (data) => {
+
+                // Send first chunk with file info
                 const stream = this.getStreams.get(payload.request_id)
                 if (!stream) {
                     this.getStreams.set(payload.request_id, {
-                        saved_date: Date.now()
+                        saved_date: Date.now(),
                     })
+
                     response.next({
                         file: {
                             file_size: data.file_size,
@@ -228,7 +237,10 @@ export class AppService {
                         } as GetResponseFileInfo
                     })
                 }
+
+                // Stream file bytes
                 if (data.content.length > 0) {
+                    this.files_downloaded_bytes.inc(data.content.length)
                     response.next({
                         chunk: {
                             content: data.content,
@@ -243,6 +255,7 @@ export class AppService {
             },
             complete: () => {
                 this.getStreams.delete(payload.request_id)
+                this.files_downloaded.inc()
                 response.next({
                     completed: {
                         request_id: payload.request_id

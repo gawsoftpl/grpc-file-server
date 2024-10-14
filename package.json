@@ -41,6 +41,7 @@
     "@nestjs/terminus": "^10.2.3",
     "@willsoto/nestjs-prometheus": "^6.0.1",
     "dotenv": "^16.4.5",
+    "lru-cache": "^11.0.1",
     "google-protobuf": "^3.21.4",
     "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",

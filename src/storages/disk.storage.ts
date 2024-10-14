@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { LoadData, SaveData, StorageInterface } from "../interfaces/storage.interface";
-import { concatMap,  from, Observable, of, Subject } from "rxjs";
+import {concatMap, from, Observable, of, Subject, Subscriber} from "rxjs";
 import { ConfigService } from "@nestjs/config";
 import * as Fs from 'fs/promises'
 import { existsSync, statSync, ReadStream, mkdirSync, Stats, createWriteStream, WriteStream, createReadStream } from 'fs'
@@ -12,6 +12,8 @@ import {sleep} from "../helpers/sleep";
 import {InitTrackerService} from "../helpers/InitTrackerService";
 import {InjectMetric} from "@willsoto/nestjs-prometheus";
 import {Counter, Gauge} from "prom-client";
+import {Cache} from "../helpers/cache";
+import {FileStorageInterface} from "../interfaces/file.interface";
 
 interface DiskStorageMetadata {
     metadata: string
@@ -22,156 +24,73 @@ interface DiskStorageMetadata {
 export class DiskStorage extends StorageAbstract implements StorageInterface, OnModuleInit {
 
     private maxMemory: number;
-    private defaultTtlMs: number;
     private defaultTtlSec: number
     private dirPath: string
     private logs: Logger = new Logger(DiskStorage.name)
     private upload_register_max_time: number
-    private memory_size: number;
+
+    /**
+     * Sum of all files in bytes
+     */
+    private totalMemorySize: number;
+
+    private files: Cache<string, FileStorageInterface>
 
     constructor(
         protected configService: ConfigService,
         protected initTrackerService: InitTrackerService,
-        @InjectMetric('garbage_collection_files')
-        protected garbage_collection_files: Counter<string>,
-        @InjectMetric('release_files')
-        protected release_files: Counter<string>,
+        @InjectMetric('removed_files')
+        protected removed_files_metrics: Counter<string>,
         @InjectMetric('hdd_storage')
-        protected hdd_storage: Gauge<string>,
-        @InjectMetric('garbage_collection_bytes')
-        protected garbage_collection_bytes: Counter<string>,
+        protected hdd_storage_metrics: Gauge<string>,
+        @InjectMetric('garbage_collection_hdd_files')
+        protected garbage_collection_hdd_files_metrics: Counter<string>,
+        @InjectMetric('garbage_collection_hdd_files_bytes')
+        protected garbage_collection_hdd_files_bytes_metrics: Counter<string>,
     ) {
         super(configService)
-        this.defaultTtlMs = configService.get('storages.disk.ttl')
-        this.defaultTtlSec = configService.get('storages.disk.ttl') * 1000
+        this.defaultTtlSec = configService.get('storages.disk.ttl')
         this.dirPath = configService.get('storages.disk.path')
         this.maxMemory = configService.get('storages.disk.max_memory')
         this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time')
-        this.memory_size = 0;
+
+        this.totalMemorySize = 0;
+
+        this.files = new Cache({
+            maxMemory: this.maxMemory
+        })
+
+        this.files.on('remove', (item, keyName) => {
+            this.logs.debug(`Remove file ${keyName}`)
+            this.removeFile(keyName, item)
+            this.removed_files_metrics.inc()
+        })
 
         setInterval(() => {
-            this.hdd_storage.set(this.memory_size)
+            this.hdd_storage_metrics.set(this.totalMemorySize)
         }, 100)
     }
 
     async onModuleInit() {
         this.initTrackerService.trackModuleInit(DiskStorage.name)
         await this.createDir()
-        this.memory_size += await this.calcDirSize()
+        await this.indexHddFiles()
         this.initTrackerService.trackModuleFinished(DiskStorage.name)
     }
 
-    exists(fileName: string): Observable<boolean> {
-        return new Observable<boolean>(subscriber => {
-            try{
-                (async() => {
-                    const fileDir = await this.fileDir(fileName)
-                    const filePath = this.filePath(fileDir, fileName)
-                    const exists = await this.fileExists(filePath)
-                    subscriber.next(exists)
-                    subscriber.complete()
-                })()
-            }catch(err){
-                this.logs.debug(err?.message)
-                subscriber.error(err)
-            }
-
-        })
-    }
-
-    async fileExists(filePath: string): Promise<boolean> {
-        try{
-            await Fs.access(filePath)
-            return true;
-        }catch(err){
-            return false;
-        }
-    }
-
-    async garbageCollection(): Promise<void> {
-        this.logs.log('Start disk garbage collection')
-        const currentTime = Date.now() / 1000;
-        let removedFiles = 0
-
-        const traverseDirectory = async(currentDir: string): Promise<void> => {
-            const entries = await Fs.readdir(currentDir, { withFileTypes: true });
-
-            for (const entry of entries) {
-                const fullPath = path.join(currentDir, entry.name);
-                if (entry.isDirectory()) {
-                    // Recursively read subdirectories
-                    await traverseDirectory(fullPath);
-                } else if (entry.isFile() && fullPath.endsWith('.bin.tmp')) {
-                    const metadataFilePath = fullPath.replace('.bin', '.metadata');
-
-                    const statFile = await Fs.stat(fullPath)
-                    const expirationTime = this.upload_register_max_time + Math.round(statFile.mtime.getTime() / 1000);
-                    if (expirationTime < currentTime) {
-                        // The file has expired, delete both .bin and .metadata files
-
-                        try {
-                            await Promise.all([
-                                Fs.unlink(fullPath),
-                                Fs.unlink(metadataFilePath),
-                            ])
-                            this.garbage_collection_files.inc()
-                            this.garbage_collection_bytes.inc(statFile.size)
-                            this.memory_size -= statFile.size
-                            removedFiles++
-
-                            this.logs.debug(`Deleted expired tmp file: ${fullPath} and metadata: ${fullPath}`);
-                        } catch (error) {
-                            this.logs.error(`Error deleting tmp file or metadata: ${error.message}`);
-                        }
-                    }
-
-                } else if (entry.isFile() && path.extname(fullPath) === '.bin') {
-                    // For each metadata file, check if the TTL has expired
-                    try {
-                        const metadataFilePath = fullPath.replace('.bin', '.metadata');
-                        const metadataContent = await Fs.readFile(metadataFilePath, 'utf8');
-                        const metadata: DiskStorageMetadata = JSON.parse(metadataContent);
-                        const statFile = await Fs.stat(fullPath)
-
-                        const expirationTime = metadata.ttl + Math.round(statFile.mtime.getTime() / 1000);
-
-                        if (expirationTime < currentTime) {
-                            // The file has expired, delete both .bin and .metadata files
-
-                            try {
-                                await Promise.all([
-                                    Fs.unlink(fullPath),
-                                    Fs.unlink(metadataFilePath),
-                                ])
-                                this.garbage_collection_files.inc()
-                                this.memory_size -= statFile.size
-                                removedFiles++
-
-                                this.logs.debug(`Deleted expired file: ${fullPath} and metadata: ${fullPath}`);
-                            } catch (error) {
-                                this.logs.error(`Error deleting file or metadata: ${error.message}`);
-                            }
-                        }
-                    } catch (error) {
-                        this.logs.error(`Error reading metadata for file ${fullPath}: ${error.message}`);
-                    }
-                }
-            }
-        }
-
-        try {
-            await traverseDirectory(this.dirPath);
-            this.logs.debug(`Garbage collection completed. Removed items: ${removedFiles}`);
-        } catch (error) {
-            this.logs.error(`Error during garbage collection: ${error.message}`);
-        }
-    }
-
     load(fileName: string, chunkSize: number): Observable<LoadData> {
+
         let stream: ReadStream
         return new Observable((subscriber) => {
             (async() => {
                 try{
+                    const file = this.files.get(fileName)
+
+                    if (!file){
+                        this.fileNoExistsResponse(subscriber)
+                        return;
+                    }
+
                     const fileDir = await this.fileDir(fileName)
                     const filePath = `${this.filePath(fileDir, fileName)}.bin`
                     const filePathMetadata = `${this.filePath(fileDir, fileName)}.metadata`
@@ -183,14 +102,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                     }catch(err){
                         // No exists return false and close
                         this.logs.debug(err);
-                        subscriber.next({
-                            exists: false,
-                            content: new Uint8Array(),
-                            file_size: 0,
-                            metadata: "",
-                            ttl: 0,
-                        })
-                        subscriber.complete()
+                        this.fileNoExistsResponse(subscriber)
                         return;
                     }
 
@@ -247,37 +159,37 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         const subject = new Subject<boolean>();
         let stream: WriteStream;
         let firstPromiseCompleted = false;
-        let fileInfo: SaveData
-        let writingChunks = []
+        let fileInfo: FileStorageInterface & {
+            fileName: string
+            lock: boolean
+        }
 
         const closeStream = () => {
             if (stream) stream.close()
         }
 
         const initStream = async(chunk: SaveData) => {
-            fileInfo = chunk
-            const fileDir = await this.fileDir(chunk.file_name, true)
-            const filePath = `${this.filePath(fileDir, chunk.file_name)}.bin.tmp`
-            const metadataFilePath = `${this.filePath(fileDir, chunk.file_name)}.metadata.tmp`
-            await this.saveMetadata(metadataFilePath, chunk)
-            stream = createWriteStream(filePath);
-            return chunk
-        };
+            const paths = await this.filePaths(chunk.file_name, true)
+            await this.saveMetadata(paths.metadata, chunk)
+            stream = createWriteStream(paths.binFile);
 
-        const commitStream = async() => {
-            const fileDir = await this.fileDir(fileInfo.file_name, true)
-            const filePath = `${this.filePath(fileDir, fileInfo.file_name)}.bin.tmp`
-            const metadataFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.metadata.tmp`
-            const commitFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.bin`
-            const commitMetadataFilePath = `${this.filePath(fileDir, fileInfo.file_name)}.metadata`
+            // Calc ttl in sec
+            const ttl = chunk?.ttl ? this.convertToInt(chunk.ttl) : this.defaultTtlSec
 
-            try{
-                await Fs.rename(metadataFilePath, commitMetadataFilePath)
-                await Fs.rename(filePath, commitFilePath)
-            }catch(err){
-                this.logs.error(err)
+            fileInfo = {
+                fileName: chunk.file_name,
+                metadata: chunk.metadata,
+                save_date: 0,
+                ttl: ttl,
+                filePaths: {
+                    metadata: paths.metadata,
+                    bin: paths.binFile,
+                },
+                fileSize: chunk.content.length,
+                lock: false
             }
 
+            return chunk
         };
 
         chunkData
@@ -296,17 +208,11 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
             .subscribe({
                 next: (chunk) => {
                     (async() => {
-                        writingChunks.push(1);
-                        const chunkSize = chunk.content.length
-
-                        if ((chunkSize + this.memory_size) > this.maxMemory) {
-                            this.logs.debug(`Need ${chunkSize} bytes`)
-                            await this.releaseFiles(chunk.file_name, chunkSize)
-                        }
-
+                        fileInfo.lock = true;
                         stream.write(chunk.content)
-                        writingChunks.pop()
-                        this.memory_size += chunk.content.length
+                        fileInfo.lock = false;
+                        fileInfo.fileSize += chunk.content.length
+                        this.totalMemorySize += chunk.content.length
                         subject.next(true)
                     })()
                 },
@@ -321,15 +227,33 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
                             // If flag isCalculating = true wait for finished
                             while(true) {
-                                if (writingChunks.length == 0) break;
+                                if (!fileInfo.lock) break;
                                 if (Date.now() - start > 5000) throw new Error('Wait for other writingChunks')
-                                await sleep(20);
+                                await sleep(50);
                             }
 
                             stream.end(async() => {
-                                await commitStream()
-                                subject.complete()
-                                closeStream()
+                                try{
+                                    await this.commitStream(fileInfo.fileName)
+                                    this.files.set(
+                                        fileInfo.fileName,
+                                        {
+                                            ttl: fileInfo.ttl,
+                                            fileSize: fileInfo.fileSize,
+                                            metadata: fileInfo.metadata,
+                                            filePaths: fileInfo.filePaths,
+                                            save_date: Date.now(),
+                                            lock: false
+                                        },
+                                        fileInfo.ttl * 1000
+                                    )
+                                    subject.complete()
+                                }catch(err){
+                                    subject.error(err)
+                                }finally {
+                                    closeStream()
+                                }
+
                             })
                         }catch(err){
                             this.logs.error(err)
@@ -338,13 +262,127 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
                     })()
 
-
                 }
-        })
+            })
 
         return subject.asObservable()
     }
 
+    exists(fileName: string): Observable<boolean> {
+        return new Observable<boolean>(subscriber => {
+            try{
+                (async() => {
+                    const fileDir = await this.fileDir(fileName)
+                    const filePath = this.filePath(fileDir, fileName)
+                    const exists = await this.fileExists(filePath)
+                    subscriber.next(exists)
+                    subscriber.complete()
+                })()
+            }catch(err){
+                this.logs.debug(err?.message)
+                subscriber.error(err)
+            }
+
+        })
+    }
+
+    async fileExists(filePath: string): Promise<boolean> {
+        try{
+            await Fs.access(filePath)
+            return true;
+        }catch(err){
+            return false;
+        }
+    }
+
+
+    /**
+     * Remove unused tmp files
+     */
+    async garbageCollection(): Promise<void> {
+        this.logs.log('Start disk garbage collection')
+        const currentTime = Date.now() / 1000;
+        let removedFiles = 0
+
+        const traverseDirectory = async(currentDir: string): Promise<void> => {
+            const entries = await Fs.readdir(currentDir, { withFileTypes: true });
+
+            for (const entry of entries) {
+                const fullPath = path.join(currentDir, entry.name);
+                if (entry.isDirectory()) {
+                    // Recursively read subdirectories
+                    await traverseDirectory(fullPath);
+                } else if (entry.isFile() && fullPath.endsWith('.bin.tmp')) {
+                    const metadataFilePath = fullPath.replace('.bin', '.metadata');
+
+                    const statFile = await Fs.stat(fullPath)
+                    const expirationTime = this.upload_register_max_time + Math.round(statFile.mtime.getTime() / 1000);
+                    if (expirationTime < currentTime) {
+                        // The file has expired, delete both .bin and .metadata files
+                        try {
+                            await Promise.all([
+                                Fs.unlink(fullPath),
+                                Fs.unlink(metadataFilePath),
+                            ])
+                            this.garbage_collection_hdd_files_metrics.inc()
+                            this.garbage_collection_hdd_files_bytes_metrics.inc(statFile.size)
+                            removedFiles++
+
+                            this.logs.debug(`Deleted expired tmp file: ${fullPath} and metadata: ${metadataFilePath}`);
+                        } catch (error) {
+                            this.logs.error(`Error deleting tmp file or metadata: ${error.message}`);
+                        }
+                    }
+
+                }
+            }
+        }
+
+        try {
+            await traverseDirectory(this.dirPath);
+            this.logs.debug(`Garbage collection completed. Removed items: ${removedFiles}`);
+        } catch (error) {
+            this.logs.error(`Error during garbage collection: ${error.message}`);
+        }
+    }
+
+    protected async removeFile(fileName: string, file: FileStorageInterface): Promise<void>
+    {
+        const paths = await this.filePaths(fileName)
+        this.totalMemorySize -= file.fileSize
+        try{
+            await Promise.all([
+                Fs.unlink(paths.metadata),
+                Fs.unlink(paths.binFile),
+            ])
+        }catch(err){
+            this.logs.error(err)
+        }
+
+    }
+
+    /**
+     * After save all chunks commit file. Rename files from bin.tmp to .bin
+     *
+     * @param fileName
+     * @protected
+     */
+    protected async commitStream(fileName: string): Promise<void> {
+        const paths = await this.filePaths(fileName);
+
+        await Promise.all([
+            Fs.rename(paths.metadata + '.tmp', paths.metadata),
+            Fs.rename(paths.binFile + '.tmp', paths.binFile)
+        ]);
+
+    };
+
+    /**
+     * Save metadata file to disk
+     * @param filePath
+     * @param file
+     * @protected
+     */
     protected async saveMetadata(filePath: string, file: SaveData): Promise<void>
     {
         const metadata: DiskStorageMetadata = {
@@ -355,12 +393,33 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         await Fs.writeFile(filePath, JSON.stringify(metadata))
     }
 
-
-    protected filePath(fileDir: string, fileName: string): string
+    /**
+     * Generate file paths
+     *
+     * @param file_name - key name
+     * @param isTmp - is temporary path
+     * @protected
+     */
+    protected async filePaths(fileName: string, isTmp = false)
     {
-        return path.join(fileDir, fileName)
+        const fileDir = await this.fileDir(fileName, isTmp)
+        const tmp = isTmp ? '.tmp' : ''
+        const filePath = `${this.filePath(fileDir, fileName)}.bin${tmp}`
+        const metadataFilePath = `${this.filePath(fileDir, fileName)}.metadata${tmp}`
+
+        return {
+            binFile: filePath,
+            metadata: metadataFilePath
+        }
     }
 
+    /**
+     * Generate subdirectory path string in storage.
+     *
+     * @param fileName
+     * @param createDirs - if true and dir not exists create subdirectory on disk
+     * @protected
+     */
     protected async fileDir(fileName: string, createDirs = false): Promise<string>
     {
         if (fileName.length < 2)
@@ -371,16 +430,76 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         }
 
         const dirPath = path.join(this.dirPath, `${fileName[0]}${fileName[1]}`)
-        const dirExists = await this.fileExists(dirPath);
 
-        if (createDirs && !dirExists) {
-            await Fs.mkdir(dirPath, {
-                recursive: true
-            })
+        if (createDirs) {
+            const dirExists = await this.fileExists(dirPath);
+            if (!dirExists) {
+                await Fs.mkdir(dirPath, {
+                    recursive: true
+                })
+            }
         }
+
         return dirPath
     }
 
+    /**
+     * On startup storage should index all files from disk
+     *
+     * @protected
+     */
+    protected indexHddFiles(): Promise<void>
+    {
+        const traverseDirectory = async(currentDir) => {
+            const entries = await Fs.readdir(currentDir, { withFileTypes: true });
+
+            for (const entry of entries) {
+                const fullPath = path.join(currentDir, entry.name);
+
+                if (entry.isDirectory()) {
+                    // Recursively read subdirectories
+                    await traverseDirectory(fullPath);
+                } else if (entry.isFile() && entry.name.endsWith('.metadata')) {
+                    try{
+                        const fileName = entry.name.replace('.metadata','')
+                        const binPath = fullPath.replace('.metadata','.bin')
+
+                        const metadata: DiskStorageMetadata = JSON.parse((await Fs.readFile(fullPath)).toString())
+                        const stats = await Fs.stat(binPath)
+
+                        const ttl = metadata.ttl ? this.convertToInt(metadata.ttl) : this.defaultTtlSec
+                        this.totalMemorySize += stats.size;
+                        this.files.set(fileName, {
+                            fileSize: stats.size,
+                            ttl: ttl,
+                            metadata: metadata.metadata,
+                            lock: false,
+                            save_date: stats.mtime.getTime(),
+                            filePaths: {
+                                metadata: fullPath,
+                                bin: binPath
+                            }
+                        }, ttl * 1000)
+                    }catch(err){
+                        this.logs.error(err)
+                    }
+
+                }
+            }
+        }
+
+        return new Promise<void>((resolve) => {
+            traverseDirectory(this.dirPath).then(() => {
+                resolve()
+            })
+        })
+    }
+
+    /**
+     * Create storage directory
+     *
+     * @protected
+     */
     protected createDir(): void
     {
         if (!existsSync(this.dirPath)) {
@@ -390,98 +509,16 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         }
     }
 
-
-    protected calcDirSize(): Promise<number>
+    /**
+     * Create full path for file in storage directory
+     *
+     * @param fileDir
+     * @param fileName
+     * @protected
+     */
+    protected filePath(fileDir: string, fileName: string): string
     {
-        let totalSize = 0;
-
-        async function traverseDirectory(currentDir) {
-            const entries = await Fs.readdir(currentDir, { withFileTypes: true });
-
-            for (const entry of entries) {
-                const fullPath = path.join(currentDir, entry.name);
-
-                if (entry.isDirectory()) {
-                    // Recursively read subdirectories
-                    await traverseDirectory(fullPath);
-                } else if (entry.isFile()) {
-                    let fileSize = 0;
-                    try{
-                        const stats = await Fs.stat(fullPath)
-                        fileSize = stats.size
-                    }catch(err){
-                        this.logs.error(err)
-                    }
-                    totalSize += fileSize;
-                }
-            }
-        }
-
-        return new Promise<number>((resolve) => {
-            traverseDirectory(this.dirPath).then(() => {
-                resolve(totalSize)
-            })
-        })
-    }
-
-    protected releaseFiles(addingKey: string, bytesRequired: number) {
-        this.logs.debug('Try to release hdd for new element')
-        const now = Date.now()
-        let releasedSize = 0
-
-        const randomSort = (a, b) => Math.random() - 0.5;
-
-        const traverseDirectory = async(currentDir) => {
-            const entries = (await Fs.readdir(currentDir, { withFileTypes: true }))
-                .sort(randomSort)
-
-            for (const entry of entries) {
-
-                if (releasedSize >= bytesRequired){
-                    this.logs.debug(`Released ${releasedSize} with time: ${((Date.now() - now) / 1000)}s`)
-                    return;
-                }
-
-                const fullPath = path.join(currentDir, entry.name);
-
-                if (entry.isDirectory()) {
-                    // Recursively read subdirectories
-                    await traverseDirectory(fullPath);
-                } else if (entry.isFile()) {
-                    if (entry.name !== `${addingKey}.metadata`) {
-                        // Get the size of the file
-                        let stats;
-                        try {
-                            stats = await Fs.stat(fullPath)
-                        } catch (err) {
-                            stats = null
-                            this.logs.debug(err)
-                        }
-
-                        if (stats && (now - stats.mtime.getTime()) > this.defaultTtlMs) {
-                            this.logs.debug(`Released ${fullPath}`)
-                            try {
-                                await Fs.unlink(fullPath)
-                                this.release_files.inc()
-                                this.memory_size -= stats.size
-                                releasedSize += stats.size;
-                            } catch (err) {
-                                this.logs.debug(err)
-                            }
-
-                        }
-
-                    }
-
-                }
-            }
-        }
-
-        return new Promise<number>(async(resolve) => {
-            traverseDirectory(this.dirPath).then(() => {
-                resolve(releasedSize)
-            })
-        })
+        return path.join(fileDir, fileName)
     }
 
 }

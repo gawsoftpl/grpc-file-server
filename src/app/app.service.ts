@@ -1,4 +1,4 @@
-import {Inject, Injectable, Logger, RequestTimeoutException} from "@nestjs/common";
+import {Inject, Injectable, Logger} from "@nestjs/common";
 import {
     FileChunk,
     GetRequest,
@@ -6,12 +6,12 @@ import {
     RegisterUploadRequest, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
 import { SaveData, StorageInterface} from "../interfaces/storage.interface";
-import {tap, Subject, mergeMap, timer, takeUntil, throwError, catchError, switchMap} from "rxjs";
-import { randomUUID } from 'crypto'
+import {tap, Subject, mergeMap, } from "rxjs";
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js'
 import {ConfigService} from "@nestjs/config";
-import {request} from "express";
+import {Counter, Gauge} from "prom-client";
+import {InjectMetric} from "@willsoto/nestjs-prometheus";
 
 interface UploadStreamDataType {
     payload: RegisterUploadRequest,
@@ -37,6 +37,22 @@ export class AppService {
         private memoryStorage: StorageInterface,
         @Inject('DiskStorage')
         private diskStorage: StorageInterface,
+        @InjectMetric('files_uploaded')
+        protected files_uploaded: Counter<string>,
+        @InjectMetric('files_downloaded')
+        protected files_downloaded: Counter<string>,
+        @InjectMetric('files_memory_downloaded')
+        protected files_memory_downloaded: Counter<string>,
+        @InjectMetric('files_downloaded_bytes')
+        protected files_downloaded_bytes: Counter<string>,
+        @InjectMetric('files_memory_downloaded_bytes')
+        protected files_memory_downloaded_bytes: Counter<string>,
+        @InjectMetric('files_uploaded_bytes')
+        protected files_uploaded_bytes: Counter<string>,
+        @InjectMetric('files_uploading')
+        protected files_uploading: Gauge<string>,
+        @InjectMetric('files_downloading')
+        protected files_downloading: Gauge<string>,
         private configService: ConfigService
     ) {
         // Copy data from disk to memory
@@ -46,17 +62,24 @@ export class AppService {
         this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time')
         this.memoryStorage.save(this.sendToMemory.asObservable())
 
+        const garbageCollectionInterval = configService.get('garbageCollection.interval') * 1000
+
         setInterval(() => {
             this.garbageCollection()
-        }, configService.get('garbageCollection.interval'))
+        }, garbageCollectionInterval)
 
         setInterval(() => {
             this.diskStorage.garbageCollection()
-        }, configService.get('garbageCollection.interval'))
+        }, garbageCollectionInterval)
 
         setInterval(() => {
             this.memoryStorage.garbageCollection()
-        }, configService.get('garbageCollection.interval'))
+        }, garbageCollectionInterval)
+
+        setInterval(() => {
+            this.files_uploading.set(this.uploadStreams.size)
+            this.files_downloading.set(this.getStreams.size)
+        },50)
     }
 
     protected garbageCollection()
@@ -101,6 +124,7 @@ export class AppService {
                         })
                     },
                     error: (err) => {
+                        this.logs.error(err);
                         response.error(new RpcException({
                             message: err.messgae,
                             code: status.INTERNAL
@@ -119,6 +143,7 @@ export class AppService {
                 }
             })
         } else if(payload?.chunk) {
+
             const uploadStream = this.uploadStreams.get(payload.chunk.request_id)
             if (!uploadStream) {
                 response.error(new RpcException({
@@ -127,6 +152,8 @@ export class AppService {
                 }))
                 return;
             }
+
+            this.files_uploaded_bytes.inc(payload.chunk.content.length)
 
             uploadStream.subject.next({
                 content: payload.chunk.content,
@@ -138,6 +165,7 @@ export class AppService {
             if (payload.chunk.last_chunk){
                 uploadStream.subject.complete()
                 this.uploadStreams.delete(payload.chunk.request_id)
+                this.files_uploaded.inc()
             }
         }else{
             response.error(new RpcException({
@@ -159,24 +187,31 @@ export class AppService {
             mergeMap((memoryExists) => {
                 if (memoryExists) {
                     this.logs.debug('Get file from memory')
+                    this.files_memory_downloaded.inc()
                     return this.memoryStorage.load(payload.file_name, chunkSize)
+                        .pipe(tap(item => this.files_memory_downloaded_bytes.inc(item.content.length)))
                 }
 
                 return this.diskStorage.load(payload.file_name, chunkSize)
                     .pipe(
                         tap(value => {
-                            if (value.exists && value.content){
-                                this.sendToMemory.next({
-                                    file_name: payload.file_name,
-                                    content: value.content,
-                                    ttl: value.ttl,
-                                    metadata: ""
-                                })
+                            if (value.exists) {
+                                this.files_downloaded_bytes.inc(value.content.length)
+                                this.files_downloaded.inc()
+
+                                if (value.content){
+                                    this.sendToMemory.next({
+                                        file_name: payload.file_name,
+                                        content: value.content,
+                                        ttl: value.ttl,
+                                        metadata: ""
+                                    })
+                                }
                             }
+
                         })
                     )
-
-            }),
+            })
         ).subscribe({
             next: (data) => {
                 const stream = this.getStreams.get(payload.request_id)
@@ -193,13 +228,14 @@ export class AppService {
                         } as GetResponseFileInfo
                     })
                 }
-
-                response.next({
-                    chunk: {
-                        content: data.content,
-                        request_id: payload.request_id,
-                    } as FileChunk
-                })
+                if (data.content.length > 0) {
+                    response.next({
+                        chunk: {
+                            content: data.content,
+                            request_id: payload.request_id,
+                        } as FileChunk
+                    })
+                }
 
             },
             error: (err) => {

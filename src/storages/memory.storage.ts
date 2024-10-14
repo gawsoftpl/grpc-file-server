@@ -7,6 +7,8 @@ import { status } from '@grpc/grpc-js';
 import {LoadData, SaveData, StorageInterface} from "../interfaces/storage.interface";
 import {FileLockedException} from "../exceptions/FileLockedException";
 import {StorageAbstract} from "./storage.abstract";
+import {InjectMetric} from "@willsoto/nestjs-prometheus";
+import {Gauge} from "prom-client";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -20,12 +22,18 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
     private max_memory: number
 
     constructor(
-        protected configService: ConfigService
+        protected configService: ConfigService,
+        @InjectMetric('memory_storage')
+        protected memory_storage: Gauge<string>
     ) {
         super(configService)
         this.files = new Map()
         this.memory_size = 0;
         this.max_memory = configService.get('storages.memory.max_memory');
+
+        setInterval(() => {
+            this.memory_storage.set(this.memory_size)
+        }, 100)
     }
 
     exists(fileName: string)
@@ -136,7 +144,7 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                 const fileSize = Number(payload.content.byteLength)
 
                 if (fileSize + this.memory_size > this.max_memory) {
-                    this.releaseMemory(payload.file_name, payload.content.byteLength)
+                    this.releaseMemory(payload.file_name, fileSize)
                 }
 
                 if (!this.files.has(payload.file_name)) {

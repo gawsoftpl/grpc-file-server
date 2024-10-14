@@ -6,11 +6,11 @@ ARG ENV
 
 COPY package.json .
 
-RUN yarn install
+RUN npm install
 
 COPY . .
 
-RUN yarn build
+RUN npm run build
 
 USER node
 
@@ -28,7 +28,7 @@ WORKDIR /project
 COPY package.json /project/package.json
 COPY protos /project/protos
 
-RUN yarn install --production
+RUN npm install --production
 
 # Copy data from builder
 COPY --chown=node:node --from=builder /project/dist /project/dist

@@ -44,16 +44,16 @@ const providers = [
         help: 'How many download requests are running',
     }),
     makeCounterProvider({
-        name: 'garbage_collection_files',
-        help: 'How many files remove by garbage collection',
+        name: 'removed_files',
+        help: 'How many times remove files from disk',
     }),
     makeCounterProvider({
-        name: 'garbage_collection_bytes',
-        help: 'How many bytes remove by garbage collection',
+        name: 'garbage_collection_hdd_files',
+        help: 'How many files remove by garbage collection from hdd',
     }),
     makeCounterProvider({
-        name: 'release_files',
-        help: 'How many times remove files for make room for new file',
+        name: 'garbage_collection_hdd_files_bytes',
+        help: 'How many bytes remove by garbage collection from hdd',
     }),
 ];
 

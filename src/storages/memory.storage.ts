@@ -9,6 +9,7 @@ import {FileLockedException} from "../exceptions/FileLockedException";
 import {StorageAbstract} from "./storage.abstract";
 import {InjectMetric} from "@willsoto/nestjs-prometheus";
 import {Gauge} from "prom-client";
+import {Cache} from "../helpers/cache";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -16,24 +17,36 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 @Injectable()
 export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
-    private files: Map<string, FileMemoryInterface>
+    //private files: Map<string, FileMemoryInterface>
+    private files: Cache<string, FileMemoryInterface>
     private logs: Logger = new Logger(MemoryStorage.name)
     private memory_size: number
+    private defaultTtlSec: number
     private max_memory: number
 
     constructor(
         protected configService: ConfigService,
         @InjectMetric('memory_storage')
-        protected memory_storage: Gauge<string>
+        protected memory_storage_metrics: Gauge<string>
     ) {
         super(configService)
-        this.files = new Map()
+
         this.memory_size = 0;
         this.max_memory = configService.get('storages.memory.max_memory');
+        this.defaultTtlSec = configService.get('storages.memory.ttl')
+
+        this.files = new Cache({
+            maxMemory: this.max_memory
+        })
+
+        this.files.on('remove', (file, key) => {
+            this.logs.debug(`Remove memory cache ${key}`)
+            this.removeItem(key, file)
+        })
 
         setInterval(() => {
-            this.memory_storage.set(this.memory_size)
-        }, 100)
+            this.memory_storage_metrics.set(this.memory_size)
+        }, 1000)
     }
 
     exists(fileName: string)
@@ -47,20 +60,13 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
     load(fileName: string, chunkSize: number): Observable<LoadData>
     {
         return new Observable(observer=> {
+
             (async() => {
                 let file: FileMemoryInterface;
                 try{
                     file = this.files.get(fileName);
-
                     if (!file || file.data.length == 0) {
-                        observer.next({
-                            content: new Uint8Array(),
-                            exists: false,
-                            metadata: "",
-                            file_size: 0,
-                            ttl: 0
-                        })
-                        observer.complete()
+                        this.fileNoExistsResponse(observer)
                         return;
                     }
 
@@ -75,9 +81,6 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
                     if (timeout)
                         clearTimeout(timeout)
-
-                    file.lock = true;
-                    file.usageCounter++;
 
                     const parsedChunkSize = this.getReadChunkSize(chunkSize)
                     const chunks = Math.ceil(file.data.length / parsedChunkSize)
@@ -106,21 +109,54 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                         file.lock = false;
                 }
             })();
-
         })
     }
 
     save(chunkData: Observable<SaveData>): Observable<boolean>
     {
         const subject = new Subject<boolean>()
-        const savedChunks: Array<boolean> = [];
+        let fileInfo: Omit<FileMemoryInterface, 'save_date' | 'data' | 'fileSize'> & {
+            file_name: string
+        };
+        const buffers = []
 
         chunkData.subscribe({
             next: async(chunk) => {
-                savedChunks.push(await this.saveInMemory(chunk));
+                if (!chunk?.content)
+                    throw new RpcException({message: 'No send content bytes', code: status.INVALID_ARGUMENT})
+
+                const ttl = chunk?.ttl ? this.convertToInt(chunk.ttl) : this.defaultTtlSec
+
+                if (!fileInfo) {
+                    fileInfo = {
+                        file_name: chunk.file_name,
+                        lock: true,
+                        metadata: chunk.metadata,
+                        ttl: ttl,
+                    }
+                }
+                buffers.push(chunk.content)
             },
             complete: () => {
-                subject.next(savedChunks.every(item => item))
+                if (!fileInfo || buffers.length == 0) {
+                    subject.next(false)
+                    subject.complete()
+                    return
+                }
+
+                const fullFile = Buffer.concat(buffers);
+                this.files.set(fileInfo.file_name, {
+                    data: fullFile,
+                    ttl: fileInfo.ttl,
+                    fileSize: fullFile.length,
+                    save_date: new Date().getTime() / 1000,
+                    lock: false,
+                    metadata: fileInfo.metadata
+                }, fileInfo.ttl * 1000)
+
+                this.memory_size += fullFile.length
+
+                subject.next(true)
                 subject.complete()
             },
             error: (err) => {
@@ -132,113 +168,13 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
     }
 
-    protected async saveInMemory(payload: SaveData): Promise<boolean>
+    garbageCollection(): Promise<void> {
+        return;
+    }
+
+    protected removeItem(key: string, fileInfo: FileMemoryInterface): void
     {
-        return new Promise((resolve, reject) => {
-            let file: FileMemoryInterface;
-
-            if (!payload?.file_name)
-                throw new RpcException({message: 'No send file_name', code: status.INVALID_ARGUMENT})
-
-            try {
-                const fileSize = Number(payload.content.byteLength)
-
-                if (fileSize + this.memory_size > this.max_memory) {
-                    this.releaseMemory(payload.file_name, fileSize)
-                }
-
-                if (!this.files.has(payload.file_name)) {
-                    this.files.set(payload.file_name, {
-                        data: Buffer.alloc(0),
-                        ttl: payload.ttl,
-                        save_date: new Date().getTime() / 1000,
-                        usageCounter: 0,
-                        byteOffset: 0,
-                        lock: true,
-                        metadata: payload.metadata
-                    })
-                }
-
-                if (!payload?.content)
-                    throw new RpcException({message: 'No send content bytes', code: status.INVALID_ARGUMENT})
-
-                file = this.files.get(payload.file_name)
-                file.data = Buffer.concat([file.data, payload.content])
-                this.memory_size += file.data.length
-
-                resolve(true)
-
-            }catch (err){
-                this.logs.error(err)
-                reject(err)
-            } finally {
-                if(file)
-                    file.lock = false;
-            }
-        });
-
-    }
-
-    protected releaseMemory(addingKey: string, bytesRequired: number) {
-        this.logs.debug('Try to release memory for new element')
-        const entries = this.files.entries();
-        let releasedMemory = 0;
-
-        while(releasedMemory < bytesRequired) {
-            const result = entries.next().value
-            if (!result || result?.done) return;
-
-            if (result[0] != addingKey) {
-                this.logs.debug(`Release ${result[0]}`)
-                releasedMemory += this.removeItem(result[0])
-            }
-        }
-    }
-
-    async garbageCollection(): Promise<void>{
-        this.logs.log('Start disk garbage collection')
-        const now = new Date().getTime() / 1000
-        let candidatesForRemoval = [];
-
-        this.files.forEach((item, key) => {
-            // Step 1: Remove expired items
-            if ((item.ttl + item.save_date) < now) {
-                this.memory_size -= item.data.length
-                this.files.delete(key);
-            } else {
-                candidatesForRemoval.push({ key, fileSize: item.data.length, ttl: item.ttl, usageCounter: item.usageCounter });
-            }
-        });
-
-        // If buffer use min 60%
-        if (this.memory_size < (this.max_memory * 0.6))
-            return
-
-        candidatesForRemoval.sort((a, b) => {
-            if (a.usageCounter === b.usageCounter) {
-                return a.ttl - b.ttl; // If usage is the same, remove the one closest to expiration
-            }
-            return a.usageCounter - b.usageCounter; // Least used items should be removed first
-        });
-
-        // Let's assume we remove half of the least used or near-expiry items
-        const itemsToRemove = Math.ceil(candidatesForRemoval.length / 2);
-
-        for (let i = 0; i < itemsToRemove; i++) {
-            this.memory_size -= candidatesForRemoval[i].fileSize
-            this.files.delete(candidatesForRemoval[i].key);
-        }
-
-    }
-
-    protected removeItem(key: string): number
-    {
-        const item = this.files.get(key)
-        const releasedMemory = item.data.length
-        this.memory_size -= releasedMemory
-        this.files.delete(key)
-        this.logs.debug(`Released item ${key}`)
-        return releasedMemory
+        this.memory_size -= fileInfo.fileSize
     }
 
     setMaxMemory(size: number)

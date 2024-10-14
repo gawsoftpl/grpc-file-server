@@ -1,4 +1,5 @@
 import { Observable } from "rxjs";
+import {FileInterface} from "./file.interface";
 
 export interface SaveData {
     file_name: string;
@@ -15,6 +16,10 @@ export interface LoadData {
     content: Uint8Array
 }
 
+export interface StorageEvents {
+    'new_item': [string, FileInterface]
+}
+
 export interface StorageInterface {
     save(chunkData: Observable<SaveData>): Observable<boolean>
 
@@ -22,5 +27,13 @@ export interface StorageInterface {
 
     load(fileName: string, chunkSize: number): Observable<LoadData>
 
+    delete(fileName: string): Observable<boolean>
+
     garbageCollection(): Promise<void>
+
+    emit<K extends keyof StorageEvents>(event: K, ...args: StorageEvents[K] extends void ? [] : StorageEvents[K]): boolean
+
+    on<K extends keyof StorageEvents>(event: K, listener: (...args: StorageEvents[K] extends void ? [] : StorageEvents[K]) => void): this
+
+    once<K extends keyof StorageEvents>(event: K, listener: (...args: StorageEvents[K] extends void ? [] : StorageEvents[K]) => void): this
 }

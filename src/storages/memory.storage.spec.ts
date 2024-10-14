@@ -96,7 +96,6 @@ describe("Test disk storage", () => {
 
                     // Read 3 times same file
                     const item = await read(name)
-                    console.log(item)
                     expect(item.text).toBe('abcabc2abc3')
                     expect((await read(name)).text).toBe('abcabc2abc3')
                     expect((await read(name)).text).toBe('abcabc2abc3')

@@ -8,7 +8,7 @@ interface CacheOptions {
 
 // Define a type map for events
 interface CacheEvents<K, CacheItemType> {
-    'remove': [CacheItemType, K];
+    'remove': [CacheItemType, K, string];
     'error': [Error];
     'close': [void];
 }
@@ -49,7 +49,7 @@ export class Cache<K, V extends FileInterface, FC=any> extends TypedEventEmitter
                 return value.fileSize
             },
             dispose: (value, key, reason) => {
-                this.emit('remove', value, key)
+                this.emit('remove', value, key, reason)
             }
         })
         this.timers = new Map()
@@ -69,7 +69,9 @@ export class Cache<K, V extends FileInterface, FC=any> extends TypedEventEmitter
             key,
             setTimeout(() => this.delete(key), ttl)
         )
-        this.data.set(key, value)
+        this.data.set(key, value, {
+            noDisposeOnSet: true
+        })
     }
 
     /**

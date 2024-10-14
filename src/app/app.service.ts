@@ -62,6 +62,17 @@ export class AppService {
 
         const garbageCollectionInterval = configService.get('garbageCollection.interval') * 1000
 
+        this.diskStorage.on('new_item', (key) => {
+            this.logs.debug(`Received item to remove from memoryStorage ${key}`)
+            this.memoryStorage.delete(key)
+                .subscribe({
+                    error: (err) => {
+                        this.logs.error('Error with remove item from memory after add new item to disk')
+                        this.logs.error(err)
+                    }
+                })
+        })
+
         setInterval(() => {
             this.garbageCollection()
         }, garbageCollectionInterval)
@@ -77,7 +88,7 @@ export class AppService {
         setInterval(() => {
             this.files_uploading.set(this.uploadStreams.size)
             this.files_downloading.set(this.getStreams.size)
-        },50)
+        }, 2_000)
     }
 
     protected garbageCollection()
@@ -161,24 +172,22 @@ export class AppService {
                 metadata: uploadStream.payload.metadata
             })
 
-            if (payload.chunk.last_chunk){
-                uploadStream.subject.complete()
-                this.uploadStreams.delete(payload.chunk.request_id)
-                this.files_uploaded.inc()
-            }
+        }else if(payload?.complete){
+            const uploadStream = this.uploadStreams.get(payload.complete.request_id)
+            uploadStream.subject.complete()
+            this.uploadStreams.delete(payload.complete.request_id)
+            this.files_uploaded.inc()
         }else{
             response.error(new RpcException({
                 message: "You have to send chunk or register payload",
                 code: status.INVALID_ARGUMENT
             }))
         }
-
     }
 
 
     getFile(payload: GetRequest, response: Subject<GetResponse>): void
     {
-
         // Convert big int to string
         const chunkSize = parseInt(payload.chunk_size.toString())
         this.memoryStorage.exists(payload.file_name).pipe(
@@ -240,13 +249,13 @@ export class AppService {
 
                 // Stream file bytes
                 if (data.content.length > 0) {
-                    this.files_downloaded_bytes.inc(data.content.length)
                     response.next({
                         chunk: {
                             content: data.content,
                             request_id: payload.request_id,
                         } as FileChunk
                     })
+                    this.files_downloaded_bytes.inc(data.content.length)
                 }
 
             },
@@ -254,13 +263,13 @@ export class AppService {
                 response.next(err)
             },
             complete: () => {
-                this.getStreams.delete(payload.request_id)
-                this.files_downloaded.inc()
                 response.next({
                     completed: {
                         request_id: payload.request_id
                     }
                 })
+                this.getStreams.delete(payload.request_id)
+                this.files_downloaded.inc()
             }
         })
 

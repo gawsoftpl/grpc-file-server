@@ -1,15 +1,29 @@
 import {ConfigService} from "@nestjs/config";
 import {Subscriber} from "rxjs";
-import {LoadData} from "../interfaces/storage.interface";
+import {LoadData, StorageEvents} from "../interfaces/storage.interface";
+import { EventEmitter } from 'events'
 
-export abstract class StorageAbstract {
+export abstract class StorageAbstract extends EventEmitter {
 
     private readChunkSize: number
 
     constructor(
         protected configService: ConfigService
     ) {
+        super()
         this.readChunkSize = configService.get('storages.disk.read_chunk_size')
+    }
+
+    emit<K extends keyof StorageEvents>(event: K, ...args: StorageEvents[K] extends void ? [] : StorageEvents[K]): boolean {
+        return super.emit(event, ...args);
+    }
+
+    on<K extends keyof StorageEvents>(event: K, listener: (...args: StorageEvents[K] extends void ? [] : StorageEvents[K]) => void): this {
+        return super.on(event, listener);
+    }
+
+    once<K extends keyof StorageEvents>(event: K, listener: (...args: StorageEvents[K] extends void ? [] : StorageEvents[K]) => void): this {
+        return super.once(event, listener);
     }
 
     /**

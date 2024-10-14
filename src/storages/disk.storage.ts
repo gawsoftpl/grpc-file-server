@@ -60,8 +60,8 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
             maxMemory: this.maxMemory
         })
 
-        this.files.on('remove', (item, keyName) => {
-            this.logs.debug(`Remove file ${keyName}`)
+        this.files.on('remove', (item, keyName, reason) => {
+            this.logs.debug(`Received remove file event from lru remove from disk ${keyName} reason: ${reason}`)
             this.removeFile(keyName, item)
             this.removed_files_metrics.inc()
         })
@@ -85,7 +85,6 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
             (async() => {
                 try{
                     const file = this.files.get(fileName)
-
                     if (!file){
                         this.fileNoExistsResponse(subscriber)
                         return;
@@ -101,7 +100,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                         fileStat = await Fs.stat(filePath);
                     }catch(err){
                         // No exists return false and close
-                        this.logs.debug(err);
+                        this.logs.error(err);
                         this.fileNoExistsResponse(subscriber)
                         return;
                     }
@@ -137,6 +136,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                     });
 
                     stream.on('end', () => {
+                        this.logs.debug(`Download completed ${fileName}`)
                         subscriber.complete()
                     });
 
@@ -233,20 +233,23 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                             }
 
                             stream.end(async() => {
+
                                 try{
                                     await this.commitStream(fileInfo.fileName)
+                                    const filePayload = {
+                                        ttl: fileInfo.ttl,
+                                        fileSize: fileInfo.fileSize,
+                                        metadata: fileInfo.metadata,
+                                        filePaths: fileInfo.filePaths,
+                                        save_date: Date.now(),
+                                        lock: false
+                                    }
                                     this.files.set(
                                         fileInfo.fileName,
-                                        {
-                                            ttl: fileInfo.ttl,
-                                            fileSize: fileInfo.fileSize,
-                                            metadata: fileInfo.metadata,
-                                            filePaths: fileInfo.filePaths,
-                                            save_date: Date.now(),
-                                            lock: false
-                                        },
+                                        filePayload,
                                         fileInfo.ttl * 1000
                                     )
+                                    this.emit('new_item', fileInfo.fileName, filePayload)
                                     subject.complete()
                                 }catch(err){
                                     subject.error(err)
@@ -295,6 +298,17 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         }
     }
 
+    delete(fileName: string): Observable<boolean>
+    {
+        return new Observable((subscriber) => {
+            try{
+                subscriber.next(this.files.delete(fileName))
+                subscriber.complete()
+            }catch(err){
+                subscriber.error(err)
+            }
+        })
+    }
 
     /**
      * Remove unused tmp files

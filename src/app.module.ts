@@ -7,6 +7,9 @@ import {AppController} from "./app/app.controller";
 import {HealthModule} from "./healthz/healthz.module";
 import {MemoryStorage} from "./storages/memory.storage";
 import {DiskStorage} from "./storages/disk.storage";
+import {InitTrackerService} from "./helpers/InitTrackerService";
+import {InitTrackerModule} from "./initTracker/initTracker.module";
+import {MetricsModule} from "./metrics/metrics.module";
 
 @Module({})
 export class AppModule {
@@ -30,6 +33,8 @@ export class AppModule {
                 ConfigModule.forRoot({
                     load: [() => Config],
                 }),
+                MetricsModule,
+                InitTrackerModule,
                 HealthModule
             ],
             exports: [ConfigModule],

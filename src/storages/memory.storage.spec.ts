@@ -5,6 +5,7 @@ import {Config} from "../config/config";
 import {Observable} from "rxjs";
 import {SaveData} from "../interfaces/storage.interface";
 import {MemoryStorage} from "./memory.storage";
+import {MetricsModule} from "../metrics/metrics.module";
 
 describe("Test disk storage", () => {
 
@@ -43,7 +44,8 @@ describe("Test disk storage", () => {
             imports: [
                 ConfigModule.forRoot({
                     load: [() => Config]
-                })
+                }),
+                MetricsModule
             ],
             providers: [
                 MemoryStorage

@@ -5,6 +5,8 @@ import {Config} from "../config/config";
 import {Observable} from "rxjs";
 import {SaveData} from "../interfaces/storage.interface";
 import { existsSync } from 'fs'
+import {InitTrackerModule} from "../initTracker/initTracker.module";
+import {MetricsModule} from "../metrics/metrics.module";
 
 describe("Test disk storage", () => {
 
@@ -15,7 +17,9 @@ describe("Test disk storage", () => {
             imports: [
                 ConfigModule.forRoot({
                     load: [() => Config]
-                })
+                }),
+                InitTrackerModule,
+                MetricsModule
             ],
             providers: [
                 DiskStorage

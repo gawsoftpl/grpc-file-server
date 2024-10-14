@@ -12,7 +12,7 @@ export const Config = {
         },
         disk: {
             // Setup max memory in bytes, default 128MB
-            max_memory: parseSize(process.env.STORAGE_DISK_MAX_SIZE || "1GB"), // default 4GB
+            max_memory: parseSize(process.env.STORAGE_DISK_MAX_SIZE || "4GB"), // default 4GB
             path: process.env.STORAGE_DISK_PATH || '/tmp/storage',
 
             read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "65536"),

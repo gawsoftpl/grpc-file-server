@@ -28,7 +28,7 @@ WORKDIR /project
 COPY package.json /project/package.json
 COPY protos /project/protos
 
-RUN npm install --production
+RUN npm install --omit=dev
 
 # Copy data from builder
 COPY --chown=node:node --from=builder /project/dist /project/dist

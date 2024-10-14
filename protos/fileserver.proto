@@ -11,21 +11,24 @@ message UploadRequest {
   oneof message {
     RegisterUploadRequest register = 1;
     FileChunkRequest chunk = 2;
+    UploadRequestCompleted complete = 3;
   }
 }
 
 message RegisterUploadRequest {
   string request_id = 1;
   string file_name = 2;
-  int64 file_size = 3;
-  int32 ttl=4;
-  string metadata = 5;
+  int32 ttl=3;
+  string metadata = 4;
 }
 
 message FileChunkRequest {
   string request_id = 1;
   bytes content = 2;
-  bool last_chunk = 3;
+}
+
+message UploadRequestCompleted{
+  string request_id = 1;
 }
 
 message UploadResponse {

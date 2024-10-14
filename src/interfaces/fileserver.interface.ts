@@ -6,12 +6,12 @@ import { Observable } from "rxjs";
 export interface UploadRequest {
   register?: RegisterUploadRequest | undefined;
   chunk?: FileChunkRequest | undefined;
+  complete?: UploadRequestCompleted | undefined;
 }
 
 export interface RegisterUploadRequest {
   request_id: string;
   file_name: string;
-  file_size: number;
   ttl: number;
   metadata: string;
 }
@@ -19,7 +19,10 @@ export interface RegisterUploadRequest {
 export interface FileChunkRequest {
   request_id: string;
   content: Uint8Array;
-  last_chunk: boolean;
+}
+
+export interface UploadRequestCompleted {
+  request_id: string;
 }
 
 export interface UploadResponse {

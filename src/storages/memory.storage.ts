@@ -168,6 +168,18 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
     }
 
+    delete(fileName: string): Observable<boolean>
+    {
+        return new Observable((subscriber) => {
+            try{
+                subscriber.next(this.files.delete(fileName))
+                subscriber.complete()
+            }catch(err){
+                subscriber.error(err)
+            }
+        })
+    }
+
     garbageCollection(): Promise<void> {
         return;
     }

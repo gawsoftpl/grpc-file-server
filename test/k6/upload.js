@@ -17,7 +17,7 @@ const sentFiles = new Counter('sent_files');
 
 export const options = {
     vus: 1,
-    duration: '2s',
+    duration: '30s',
     // stages: [
     //     { duration: '5s', target: 10  }, // simulate ramp-up of traffic from 1 to 100 users over 5 minutes.
     //     { duration: '20s', target: 200 }, // stay at 100 users for 10 minutes

@@ -86,6 +86,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                 try{
                     const file = this.files.get(fileName)
                     if (!file){
+                        this.logs.debug(`${fileName} not exists on hdd`);
                         this.fileNoExistsResponse(subscriber)
                         return;
                     }
@@ -115,7 +116,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
                     let chunkIndex = 0;
                     stream.on('data', (chunk) => {
-                        this.logs.debug(`Load ${fileName} ${chunk.length} bytes of data.`);
+                        this.logs.debug(`Load ${fileName} ${chunk.length} bytes from disk of data.`);
 
                         const baseData = chunkIndex == 0 ? {
                             metadata: metadata.metadata,

@@ -2,13 +2,18 @@ import {yn} from "../helpers/yn";
 import {parseSize} from "../helpers/parseSize";
 
 export const Config = {
+    timeouts: {
+        upload: parseInt(process.env.UPLOAD_TIMEOUT || '60000'),
+        download: parseInt(process.env.DOWNLOAD_TIMEOUT || '60000'),
+    },
     storages: {
         memory: {
             // Setup max memory in bytes, default 128MB
             max_memory: parseSize(process.env.STORAGE_MEMORY_MAX_SIZE || "128MB"), // default 128MB
 
             // Default ttl per second
-            ttl: parseInt(process.env.STORAGE_MEMORY_TTL || '600')
+            ttl: parseInt(process.env.STORAGE_MEMORY_TTL || '600'),
+
         },
         disk: {
             // Setup max memory in bytes, default 128MB
@@ -18,7 +23,7 @@ export const Config = {
             read_chunk_size: parseInt(process.env.STORAGE_DISK_READ_CHUNK || "65536"),
 
             // ttl in seconds
-            ttl: parseInt(process.env.STORAGE_DISK_TTL || '600')
+            ttl: parseInt(process.env.STORAGE_DISK_TTL || '600'),
 
         }
     },

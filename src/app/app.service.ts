@@ -6,13 +6,28 @@ import {
     RegisterUploadRequest, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
 import { SaveData, StorageInterface} from "../interfaces/storage.interface";
-import {tap, Subject, mergeMap, first, concatMap, of, EMPTY,} from "rxjs";
+import {
+    tap,
+    Subject,
+    mergeMap,
+    first,
+    concatMap,
+    of,
+    EMPTY,
+    finalize,
+    catchError,
+    throwError,
+    takeUntil,
+    timer, switchMap,
+} from "rxjs";
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js'
 import {ConfigService} from "@nestjs/config";
 import {Counter, Gauge} from "prom-client";
 import {InjectMetric} from "@willsoto/nestjs-prometheus";
 import {FileMemoryInterface} from "../interfaces/file.interface";
+import {TimeoutException} from "../exceptions/TimeoutException";
+import {Config} from "../config/config";
 
 interface UploadStreamDataType {
     payload: RegisterUploadRequest,
@@ -31,6 +46,7 @@ export class AppService {
     private uploadStreams: Map<string, UploadStreamDataType>
     private getStreams: Map<string, GetStreamType>
     private upload_register_max_time: number
+    private configTimeouts: typeof Config.timeouts;
 
     constructor(
         @Inject('MemoryStorage')
@@ -56,6 +72,7 @@ export class AppService {
         private configService: ConfigService
     ) {
         // Copy data from disk to memory
+        this.configTimeouts = configService.get('timeouts')
         this.uploadStreams = new Map()
         this.getStreams = new Map()
         this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time')
@@ -116,7 +133,24 @@ export class AppService {
             const subject = new Subject<SaveData>()
 
             // On response from disk
-            this.diskStorage.save(subject)
+            this.diskStorage.save(subject.pipe(
+                takeUntil(timer(this.configTimeouts.upload)
+                    .pipe(
+                        switchMap((x) => throwError(() => {
+                            this.uploadStreams.delete(payload.register.request_id)
+                            subject.unsubscribe()
+                            return new TimeoutException(`Timeout for upload file request id: ${payload.register.request_id} max ${this.configTimeouts.upload}ms`)
+                        }))
+                    )
+                ),
+                catchError(err => {
+                    response.error(new RpcException({
+                        message: err?.message ?? "Unknown error",
+                        code: status.ABORTED
+                    }))
+                    return throwError(err);
+                }),
+            ))
                 .subscribe({
                     next: (result) => {
                         response.next({
@@ -157,7 +191,7 @@ export class AppService {
             const uploadStream = this.uploadStreams.get(payload.chunk.request_id)
             if (!uploadStream) {
                 response.error(new RpcException({
-                    message: "Cant find upload stream",
+                    message: "Cant find upload stream. Please first send register request and after register send chunks",
                     code: status.INTERNAL
                 }))
                 return;
@@ -174,6 +208,13 @@ export class AppService {
 
         }else if(payload?.complete){
             const uploadStream = this.uploadStreams.get(payload.complete.request_id)
+            if (!uploadStream){
+                response.error(new RpcException({
+                    message: "Cant find upload stream. Please first send register request and after register send chunks and complete when finished",
+                    code: status.INTERNAL
+                }))
+                return;
+            }
             uploadStream.subject.complete()
             this.uploadStreams.delete(payload.complete.request_id)
             this.files_uploaded.inc()
@@ -188,9 +229,20 @@ export class AppService {
 
     getFile(payload: GetRequest, response: Subject<GetResponse>): void
     {
+
+        const timeoutOperator = () => timer(this.configTimeouts.download)
+            .pipe(
+                switchMap(() => throwError(() => {
+                    this.getStreams.delete(payload.file_name)
+                    return new TimeoutException(`Timeout for download file request_id: ${payload.request_id}, ${payload.file_name}  max ${this.configTimeouts.download}ms`)
+                }))
+            )
+
+
         // Convert big int to string
         const chunkSize = parseInt(payload.chunk_size.toString())
         this.memoryStorage.exists(payload.file_name).pipe(
+            takeUntil(timeoutOperator()),
             mergeMap((memoryExists) => {
                 if (memoryExists) {
                     this.logs.debug('Get file from memory')
@@ -198,35 +250,41 @@ export class AppService {
                     return this.memoryStorage.load(payload.file_name, chunkSize)
                         .pipe(tap(item => this.files_memory_downloaded_bytes.inc(item.content.length)))
                 }
-
                 // Get data from hdd
                 const dataFromStorage = this.diskStorage.load(payload.file_name, chunkSize);
 
                 // Save hdd data in memory
                 const streamToMemory = new Subject<SaveData>()
                 this.memoryStorage.save(streamToMemory.asObservable())
-                dataFromStorage
+
+                // Copy data from hdd to memory with pipe
+                return dataFromStorage
                     .pipe(
+                        takeUntil(timeoutOperator()),
                         concatMap((val) => {
                             if (val.exists) {
-                                return of(val)
+                                streamToMemory.next({
+                                    file_name: payload.file_name,
+                                    metadata: val.metadata,
+                                    ttl: val.ttl,
+                                    content: val.content
+                                })
                             }
-                            return EMPTY
+                            return of(val)
+                        }),
+                        finalize(() => {
+                            streamToMemory.complete()
                         })
                     )
-                    .subscribe({
-                        next: (chunk) => streamToMemory.next({
-                            file_name: payload.file_name,
-                            metadata: chunk.metadata,
-                            ttl: chunk.ttl,
-                            content: chunk.content
-                        }),
-                        complete: () => streamToMemory.complete(),
-                        error: (e) => streamToMemory.error(e)
-                    })
-
-                return dataFromStorage
-            })
+            }),
+            catchError(err => {
+                this.logs.error(err);
+                response.error(new RpcException({
+                    message: err?.message ?? "Unknown error",
+                    code: status.ABORTED
+                }))
+                return throwError(err);
+            }),
         ).subscribe({
             next: (data) => {
 

@@ -9,7 +9,11 @@ next delivery
 - GRPC Reflection
 - Auto remove old files
 - Move files to RAM when download first time for fast delivery
+- Use LRU for disk and ram memory storage
 
 # Ports
 - Grpc - 3000
 - Metrics - 9090 (http://localhost:9090/metrics)
+
+# Client example
+See example for upload and download files: [examples/upload-download.js](examples/upload-download.js)

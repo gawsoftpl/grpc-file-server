@@ -7,6 +7,7 @@ next delivery
 # Features
 - BiDirection upload and download stream
 - GRPC Reflection
+- Setup max disk and ram storage size
 - Auto remove old files
 - Move files to RAM when download first time for fast delivery
 - Use LRU for disk and ram memory storage

@@ -11,6 +11,7 @@ next delivery
 - Auto remove old files
 - Move files to RAM when download first time for fast delivery
 - Use LRU for disk and ram memory storage
+- Grpc health probe 
 
 # Ports
 - Grpc - 3000

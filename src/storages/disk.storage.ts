@@ -224,12 +224,17 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                 complete: () => {
                     (async() => {
                         try{
+                            if (!fileInfo || !stream) {
+                                throw new Error('No send any chunks close upload')
+                            }
+
                             const start = Date.now()
 
                             // If flag isCalculating = true wait for finished
                             while(true) {
                                 if (!fileInfo.lock) break;
-                                if (Date.now() - start > 5000) throw new Error('Wait for other writingChunks')
+                                if (Date.now() - start > 5000)
+                                    throw new Error('Wait for other writingChunks')
                                 await sleep(50);
                             }
 
@@ -260,8 +265,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
                             })
                         }catch(err){
-                            this.logs.error(err)
-                            subject.complete()
+                            subject.error(err)
                         }
 
                     })()

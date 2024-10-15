@@ -62,7 +62,6 @@ export default function () {
             register: {
                 request_id: requestId,
                 file_name: fileName,
-                file_size: FILE_SIZE,  // Example file size
                 ttl: 60,  // Time to live in seconds
                 metadata: 'Sample metadata'
             }
@@ -74,10 +73,15 @@ export default function () {
                 chunk: {
                     request_id: requestId,
                     content: b64encode(new Uint8Array(CHUNK_SIZE)),  // Empty chunk of bytes for test
-                    last_chunk: i === (chunks - 1),
                 }
             });
         }
+
+        stream.write({
+            complete: {
+                request_id: requestId
+            }
+        })
     }
 
     stream.end()

@@ -22,7 +22,6 @@ export class AppController {
 
         data.subscribe({
             next: (item) => {
-                this.logs.debug("New download request")
                 this.appService.getFile(item, subject)
             },
             complete: () => {
@@ -41,7 +40,6 @@ export class AppController {
 
         data.subscribe({
             next: (item) => {
-                this.logs.debug("New upload request")
                 this.appService.upload(item, subject)
             },
             complete: onComplete,

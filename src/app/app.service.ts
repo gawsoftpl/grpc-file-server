@@ -128,7 +128,7 @@ export class AppService {
     upload(payload: UploadRequest, response: Subject<UploadResponse>): void
     {
         if (payload?.register) {
-
+            this.logs.debug(`New upload request ${payload.register.request_id}`)
             // Subject for send message to disk
             const subject = new Subject<SaveData>()
 
@@ -245,7 +245,7 @@ export class AppService {
 
     getFile(payload: GetRequest, response: Subject<GetResponse>): void
     {
-
+        this.logs.debug(`New download request ${payload.request_id}`)
         const timeoutOperator = () => timer(this.configTimeouts.download)
             .pipe(
                 switchMap(() => throwError(() => {

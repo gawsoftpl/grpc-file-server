@@ -3,6 +3,12 @@ import { Metadata } from "@grpc/grpc-js";
 import { GrpcMethod, GrpcStreamMethod } from "@nestjs/microservices";
 import { Observable } from "rxjs";
 
+export interface ErrorResponse {
+  request_id: string;
+  message: string;
+  code: number;
+}
+
 export interface UploadRequest {
   register?: RegisterUploadRequest | undefined;
   chunk?: FileChunkRequest | undefined;
@@ -29,6 +35,7 @@ export interface UploadResponse {
   register?: RegisterUploadResponse | undefined;
   chunk?: FileChunkResponse | undefined;
   saved?: FileSaved | undefined;
+  error?: ErrorResponse | undefined;
 }
 
 export interface RegisterUploadResponse {
@@ -54,6 +61,7 @@ export interface GetResponse {
   file?: GetResponseFileInfo | undefined;
   chunk?: FileChunk | undefined;
   completed?: FileReadCompleted | undefined;
+  error?: ErrorResponse | undefined;
 }
 
 export interface GetResponseFileInfo {

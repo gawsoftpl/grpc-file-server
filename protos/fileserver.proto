@@ -7,6 +7,12 @@ service FileServerService {
   rpc Upload (stream UploadRequest) returns (stream UploadResponse);
 }
 
+message ErrorResponse {
+  string request_id = 1;
+  string message = 2;
+  int32 code = 3;
+}
+
 message UploadRequest {
   oneof message {
     RegisterUploadRequest register = 1;
@@ -36,6 +42,7 @@ message UploadResponse {
     RegisterUploadResponse register = 1;
     FileChunkResponse chunk = 2;
     FileSaved saved = 3;
+    ErrorResponse error = 4;
   }
 }
 
@@ -63,6 +70,7 @@ message GetResponse {
       GetResponseFileInfo file = 1;
       FileChunk chunk = 2;
       FileReadCompleted completed = 3;
+      ErrorResponse error = 4;
   }
 }
 message GetResponseFileInfo {

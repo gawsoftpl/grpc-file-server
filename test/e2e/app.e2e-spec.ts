@@ -32,9 +32,14 @@ describe('Proxy cache server GRPC (e2e)', () => {
 
             call.on('data', (message) => {
                 uploadMessages.push(message)
-                if (message?.saved) {
+                if (message?.saved || message?.error) {
                     call.end()
                 }
+
+                if (message?.error) {
+                    console.log(message.error)
+                }
+
             })
 
             call.on('end', async () => {
@@ -67,6 +72,7 @@ describe('Proxy cache server GRPC (e2e)', () => {
                     request_id: uploadId,
                 }
             })
+
         });
     }
 
@@ -94,6 +100,10 @@ describe('Proxy cache server GRPC (e2e)', () => {
 
                 if (message?.completed && message.completed.request_id == downloadId) {
                     callDownload.end()
+                }
+
+                if (message?.error) {
+                    console.log(message.error)
                 }
                 downloadedMessages.push(message)
             })
@@ -179,6 +189,28 @@ describe('Proxy cache server GRPC (e2e)', () => {
             done()
         })()
     })
+
+    it('Should return error on upload', (done) => {
+        (async() => {
+            const { uploadMessages, uploadId } = await uploadFile('ab', [], {});
+            console.log(uploadMessages)
+            expect(uploadMessages).toMatchObject(
+                [
+                    { register: { request_id: uploadId }},
+                    {
+                        error: {
+                            request_id: uploadId,
+                            message: 'No send any chunks close upload',
+                            code: 13
+                        }
+                    }
+
+                ]
+            )
+            done()
+        })()
+    })
+
 
     it('Should save and download file', (done) => {
 

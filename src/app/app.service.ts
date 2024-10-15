@@ -144,10 +144,13 @@ export class AppService {
                     )
                 ),
                 catchError(err => {
-                    response.error(new RpcException({
-                        message: err?.message ?? "Unknown error",
-                        code: status.ABORTED
-                    }))
+                    response.next({
+                        error: {
+                            request_id: payload.register.request_id,
+                            message: err?.message ?? "Unknown error",
+                            code: status.ABORTED
+                        }
+                    })
                     return throwError(err);
                 }),
             ))
@@ -168,11 +171,15 @@ export class AppService {
                         })
                     },
                     error: (err) => {
+
                         this.logs.error(err);
-                        response.error(new RpcException({
-                            message: err.messgae,
-                            code: status.INTERNAL
-                        }))
+                        response.next({
+                            error: {
+                                request_id: payload.register.request_id,
+                                message: err?.message ?? "Unknown error",
+                                code: status.INTERNAL
+                            }
+                        })
                     }
                 })
 
@@ -190,10 +197,13 @@ export class AppService {
 
             const uploadStream = this.uploadStreams.get(payload.chunk.request_id)
             if (!uploadStream) {
-                response.error(new RpcException({
-                    message: "Cant find upload stream. Please first send register request and after register send chunks",
-                    code: status.INTERNAL
-                }))
+                response.next({
+                    error: {
+                        request_id: payload.chunk.request_id,
+                        message: "Cant find upload stream. Please first send register request and after register send chunks",
+                        code: status.INTERNAL
+                    }
+                })
                 return;
             }
 
@@ -209,20 +219,26 @@ export class AppService {
         }else if(payload?.complete){
             const uploadStream = this.uploadStreams.get(payload.complete.request_id)
             if (!uploadStream){
-                response.error(new RpcException({
-                    message: "Cant find upload stream. Please first send register request and after register send chunks and complete when finished",
-                    code: status.INTERNAL
-                }))
+                response.next({
+                    error: {
+                        request_id: payload.complete.request_id,
+                        message: "Cant find upload stream. Please first send register request and after register send chunks and complete when finished",
+                        code: status.INTERNAL
+                    }
+                })
                 return;
             }
             uploadStream.subject.complete()
             this.uploadStreams.delete(payload.complete.request_id)
             this.files_uploaded.inc()
         }else{
-            response.error(new RpcException({
-                message: "You have to send chunk or register payload",
-                code: status.INVALID_ARGUMENT
-            }))
+            response.next({
+                error: {
+                    request_id: "",
+                    message: "You have to send chunk or register payload",
+                    code: status.INVALID_ARGUMENT
+                }
+            })
         }
     }
 
@@ -279,10 +295,13 @@ export class AppService {
             }),
             catchError(err => {
                 this.logs.error(err);
-                response.error(new RpcException({
-                    message: err?.message ?? "Unknown error",
-                    code: status.ABORTED
-                }))
+                response.next({
+                    error: {
+                        request_id: payload.request_id,
+                        message: err?.message ?? "Unknown error",
+                        code: status.ABORTED
+                    }
+                })
                 return throwError(err);
             }),
         ).subscribe({

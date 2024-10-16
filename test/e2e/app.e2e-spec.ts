@@ -64,7 +64,7 @@ describe('Proxy cache server GRPC (e2e)', () => {
 
     afterAll(async () => {
         await app.close();
-    });
+    }, 40_000);
 
     it('Health should response success', (done) => {
         clientHealth.Check({ service: 'health' }, (e, response) => {

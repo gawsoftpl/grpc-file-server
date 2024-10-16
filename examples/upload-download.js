@@ -145,10 +145,7 @@ const uploadFile = (client, fileName, fileChunks) => {
         credentialsClient,
     );
 
-    // Upload file
-    // Stream ids
-
-    // Filename must be hexdecimal
+    // Filename must be hexadecimal
     const fileName =  "2070e4cfb8f24209647d3c9ec55098ee"
     const fileChunks = [
         Buffer.from("abc"),

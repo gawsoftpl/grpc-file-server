@@ -239,7 +239,6 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                             }
 
                             stream.end(async() => {
-
                                 try{
                                     await this.commitStream(fileInfo.fileName)
                                     const filePayload = {
@@ -255,6 +254,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                                         filePayload,
                                         fileInfo.ttl * 1000
                                     )
+                                    this.logs.debug(`Save file ${fileInfo.fileName} ${fileInfo.fileSize}bytes on hdd`)
                                     this.emit('new_item', fileInfo.fileName, filePayload)
                                     subject.complete()
                                 }catch(err){

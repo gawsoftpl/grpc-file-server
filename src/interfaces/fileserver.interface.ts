@@ -52,15 +52,25 @@ export interface FileSaved {
 }
 
 export interface GetRequest {
+  file?: GetRequestData | undefined;
+  chunk?: GetRequestStartSendChunks | undefined;
+}
+
+export interface GetRequestData {
   file_name: string;
+  request_id: string;
+}
+
+export interface GetRequestStartSendChunks {
   request_id: string;
   chunk_size: number;
 }
 
 export interface GetResponse {
   file?: GetResponseFileInfo | undefined;
+  completed_data?: FileReadCompleted | undefined;
   chunk?: FileChunk | undefined;
-  completed?: FileReadCompleted | undefined;
+  completed_chunks?: FileReadCompleted | undefined;
   error?: ErrorResponse | undefined;
 }
 

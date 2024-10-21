@@ -1,9 +1,9 @@
 import {Controller, Logger} from '@nestjs/common';
-import {GrpcMethod, GrpcStreamCall, GrpcStreamMethod} from '@nestjs/microservices';
+import {  GrpcStreamMethod} from '@nestjs/microservices';
 import { Observable, Subject } from 'rxjs';
 import { AppService } from './app.service';
 import {
-    FileChunk, GetRequest,
+    GetRequest,
     GetResponse, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
 

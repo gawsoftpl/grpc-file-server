@@ -39,7 +39,20 @@ const downloadFile = (client, fileName) => {
                 chunks.push(Buffer.from(message.chunk.content))
             }
 
-            if (message?.completed && message.completed.request_id == downloadId) {
+            if (message?.completed_data && message.completed_data.request_id == downloadId) {
+                if (message.completed_data.exists) {
+                    callDownload.write({
+                        file: {
+                            chunk_size: 1024,
+                            request_id: downloadId,
+                        }
+                    })
+                }else{
+                    callDownload.end()
+                }
+            }
+
+            if (message?.completed_chunks && message.completed_chunks.request_id == downloadId) {
                 callDownload.end()
             }
 
@@ -63,9 +76,10 @@ const downloadFile = (client, fileName) => {
         })
 
         callDownload.write({
-            file_name: fileName,
-            request_id: downloadId,
-            chunk_size: 1024
+            file: {
+                file_name: fileName,
+                request_id: downloadId,
+            }
         })
     })
 }

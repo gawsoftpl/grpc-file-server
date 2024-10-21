@@ -13,7 +13,6 @@ export interface LoadData {
     file_size: number;
     metadata: string;
     ttl: number
-    content: Uint8Array
 }
 
 export interface StorageEvents {
@@ -25,7 +24,11 @@ export interface StorageInterface {
 
     exists(fileName: string): Observable<boolean>
 
-    load(fileName: string, chunkSize: number): Observable<LoadData>
+    // Get file content chunks
+    loadChunks(fileName: string, chunkSize: number): Observable<Uint8Array>
+
+    // Get file data with metadata without content binary
+    load(fileName: string): Observable<LoadData>
 
     delete(fileName: string): Observable<boolean>
 

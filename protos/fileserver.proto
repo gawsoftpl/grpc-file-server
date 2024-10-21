@@ -60,17 +60,29 @@ message FileSaved {
 }
 
 message GetRequest {
+  oneof message {
+      GetRequestData file = 1;
+      GetRequestStartSendChunks chunk = 2;
+  }
+}
+
+message GetRequestData {
   string file_name = 1;
   string request_id = 2;
-  int64 chunk_size = 3;
+}
+
+message GetRequestStartSendChunks {
+  string request_id = 1;
+  int64 chunk_size = 2;
 }
 
 message GetResponse {
   oneof message {
       GetResponseFileInfo file = 1;
-      FileChunk chunk = 2;
-      FileReadCompleted completed = 3;
-      ErrorResponse error = 4;
+      FileReadCompleted completed_data = 2;
+      FileChunk chunk = 3;
+      FileReadCompleted completed_chunks = 4;
+      ErrorResponse error = 5;
   }
 }
 message GetResponseFileInfo {

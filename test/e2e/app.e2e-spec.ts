@@ -76,6 +76,7 @@ describe('Proxy cache server GRPC (e2e)', () => {
     it('Should return info that file not exists', (done) => {
         (async() => {
             const { fileInfo, downloadId } = await downloadFile(client, 'aaa');
+
             expect(fileInfo.exists).toBeFalsy()
             expect(fileInfo.request_id).toBe(downloadId)
             done()
@@ -102,7 +103,6 @@ describe('Proxy cache server GRPC (e2e)', () => {
             done()
         })()
     })
-
 
     it('Should save and download file', (done) => {
 
@@ -168,13 +168,18 @@ describe('Proxy cache server GRPC (e2e)', () => {
                     }
                 },
                 {
+                    completed_data: {
+                        request_id: downloadId
+                    }
+                },
+                {
                     chunk: {
                         request_id: downloadId,
                         content: file
                     }
                 },
                 {
-                    completed: {
+                    completed_chunks: {
                         request_id: downloadId
                     }
                 }

@@ -78,7 +78,44 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         this.initTrackerService.trackModuleFinished(DiskStorage.name)
     }
 
-    load(fileName: string, chunkSize: number): Observable<LoadData> {
+    load(fileName: string): Observable<LoadData>
+    {
+        return new Observable((subscriber) => {
+            (async() => {
+
+                const file = this.files.get(fileName)
+                if (!file){
+                    this.logs.debug(`${fileName} not exists on hdd`);
+                    this.fileNoExistsResponse(subscriber)
+                    return;
+                }
+
+                let fileStat: Stats;
+                try {
+                    fileStat = await Fs.stat(file.filePaths.bin);
+                }catch(err){
+                    // No exists return false and close
+                    this.logs.error(err);
+                    subscriber.error('Cant read data')
+                    return;
+                }
+
+                const fileMetadata = (await Fs.readFile(file.filePaths.metadata)).toString()
+                const metadata: DiskStorageMetadata = JSON.parse(fileMetadata);
+
+                subscriber.next({
+                    exists: true,
+                    metadata: metadata.metadata,
+                    file_size: fileStat.size,
+                    ttl: metadata.ttl
+                })
+                subscriber.complete()
+            })()
+
+        })
+    }
+
+    loadChunks(fileName: string, chunkSize: number): Observable<Uint8Array> {
 
         let stream: ReadStream
         return new Observable((subscriber) => {
@@ -86,30 +123,13 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                 try{
                     const file = this.files.get(fileName)
                     if (!file){
-                        this.logs.debug(`${fileName} not exists on hdd`);
-                        this.fileNoExistsResponse(subscriber)
+                        subscriber.error('You try to send chunks for not exists file')
                         return;
                     }
-
-                    const fileDir = await this.fileDir(fileName)
-                    const filePath = `${this.filePath(fileDir, fileName)}.bin`
-                    const filePathMetadata = `${this.filePath(fileDir, fileName)}.metadata`
 
                     // Get file data and check exists
-                    let fileStat: Stats;
-                    try {
-                        fileStat = await Fs.stat(filePath);
-                    }catch(err){
-                        // No exists return false and close
-                        this.logs.error(err);
-                        this.fileNoExistsResponse(subscriber)
-                        return;
-                    }
-
-                    const fileMetadata = (await Fs.readFile(filePathMetadata)).toString();
-                    const metadata: DiskStorageMetadata = JSON.parse(fileMetadata);
                     if (!stream)
-                        stream = createReadStream(filePath, {
+                        stream = createReadStream(file.filePaths.bin, {
                             highWaterMark: this.getReadChunkSize(chunkSize),
                         });
 
@@ -117,22 +137,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                     let chunkIndex = 0;
                     stream.on('data', (chunk) => {
                         this.logs.debug(`Load ${fileName} ${chunk.length} bytes from disk of data.`);
-
-                        const baseData = chunkIndex == 0 ? {
-                            metadata: metadata.metadata,
-                            file_size: fileStat.size,
-                            ttl: metadata.ttl
-                        } : {
-                            metadata: "",
-                            file_size: 0,
-                            ttl: 0
-                        }
-
-                        subscriber.next({
-                            ...baseData,
-                            exists: true,
-                            content: new Uint8Array(Buffer.from(chunk))
-                        })
+                        subscriber.next(new Uint8Array(Buffer.from(chunk)))
                         chunkIndex++;
                     });
 
@@ -245,7 +250,10 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                                         ttl: fileInfo.ttl,
                                         fileSize: fileInfo.fileSize,
                                         metadata: fileInfo.metadata,
-                                        filePaths: fileInfo.filePaths,
+                                        filePaths: {
+                                            bin: fileInfo.filePaths.bin.replace('.tmp',''),
+                                            metadata: fileInfo.filePaths.metadata.replace('.tmp',''),
+                                        },
                                         save_date: Date.now(),
                                         lock: false
                                     }
@@ -254,7 +262,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                                         filePayload,
                                         fileInfo.ttl * 1000
                                     )
-                                    this.logs.debug(`Save file ${fileInfo.fileName} ${fileInfo.fileSize}bytes on hdd`)
+                                    this.logs.debug(`Save file ${fileInfo.fileName} ${Math.round(fileInfo?.fileSize ?? 0) / 1024} KB on hdd`)
                                     this.emit('new_item', fileInfo.fileName, filePayload)
                                     subject.complete()
                                 }catch(err){

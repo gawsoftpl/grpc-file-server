@@ -1,19 +1,17 @@
 import {Inject, Injectable, Logger} from "@nestjs/common";
 import {
     FileChunk,
-    GetRequest,
-    GetResponse, GetResponseFileInfo,
+    GetRequest, GetRequestData, GetRequestStartSendChunks,
+    GetResponse,
     RegisterUploadRequest, UploadRequest, UploadResponse,
 } from "../interfaces/fileserver.interface";
-import { SaveData, StorageInterface} from "../interfaces/storage.interface";
+import {LoadData, SaveData, StorageInterface} from "../interfaces/storage.interface";
 import {
     tap,
     Subject,
     mergeMap,
-    first,
     concatMap,
     of,
-    EMPTY,
     finalize,
     catchError,
     throwError,
@@ -25,7 +23,6 @@ import { status } from '@grpc/grpc-js'
 import {ConfigService} from "@nestjs/config";
 import {Counter, Gauge} from "prom-client";
 import {InjectMetric} from "@willsoto/nestjs-prometheus";
-import {FileMemoryInterface} from "../interfaces/file.interface";
 import {TimeoutException} from "../exceptions/TimeoutException";
 import {Config} from "../config/config";
 
@@ -37,6 +34,8 @@ interface UploadStreamDataType {
 
 interface GetStreamType {
     saved_date: number
+    file_name: string
+    file_data: LoadData
 }
 
 @Injectable()
@@ -46,6 +45,7 @@ export class AppService {
     private uploadStreams: Map<string, UploadStreamDataType>
     private getStreams: Map<string, GetStreamType>
     private upload_register_max_time: number
+    private download_register_max_time: number
     private configTimeouts: typeof Config.timeouts;
 
     constructor(
@@ -75,7 +75,8 @@ export class AppService {
         this.configTimeouts = configService.get('timeouts')
         this.uploadStreams = new Map()
         this.getStreams = new Map()
-        this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time')
+        this.upload_register_max_time = configService.get('garbageCollection.upload_register_max_time') * 1000
+        this.download_register_max_time = configService.get('garbageCollection.download_register_max_time') * 1000
 
         const garbageCollectionInterval = configService.get('garbageCollection.interval') * 1000
 
@@ -119,7 +120,7 @@ export class AppService {
         })
 
         this.getStreams.forEach((item, key) => {
-            if ((item.saved_date + this.upload_register_max_time) > now) {
+            if ((item.saved_date + this.download_register_max_time) > now) {
                 this.getStreams.delete(key)
             }
         })
@@ -242,51 +243,142 @@ export class AppService {
         }
     }
 
-
     getFile(payload: GetRequest, response: Subject<GetResponse>): void
     {
-        this.logs.debug(`New download request ${payload.request_id}`)
+        if (payload?.file){
+            this.getFileData(payload.file, response)
+        }else if (payload?.chunk){
+            this.emitFileChunks(payload.chunk, response)
+        }else{
+            throw new RpcException({
+                message: "Wrong message for getRequest",
+                code: status.INVALID_ARGUMENT
+            })
+        }
+    }
+
+    getFileData(payload: GetRequestData, response: Subject<GetResponse>): void
+    {
+        this.logs.debug(`New get file data request ${payload.request_id}`)
         const timeoutOperator = () => timer(this.configTimeouts.download)
             .pipe(
                 switchMap(() => throwError(() => {
-                    this.getStreams.delete(payload.file_name)
-                    return new TimeoutException(`Timeout for download file request_id: ${payload.request_id}, ${payload.file_name}  max ${this.configTimeouts.download}ms`)
+                    this.getStreams.delete(payload.request_id)
+                    return new TimeoutException(`Timeout for download file data request_id: ${payload.request_id}, ${payload.file_name}  max ${this.configTimeouts.download}ms`)
+                }))
+            )
+
+        // Convert big int to string
+        this.memoryStorage.exists(payload.file_name).pipe(
+            takeUntil(timeoutOperator()),
+            mergeMap((memoryExists) => {
+                if (memoryExists) {
+                    this.logs.debug('Get file data from memory')
+                    return this.memoryStorage.load(payload.file_name)
+                }
+                // Get data from hdd
+                return this.diskStorage.load(payload.file_name);
+            }),
+            catchError(err => {
+                this.logs.error(err);
+                response.next({
+                    error: {
+                        request_id: payload.request_id,
+                        message: err?.message ?? "Unknown error",
+                        code: status.ABORTED
+                    }
+                })
+                return throwError(err);
+            }),
+        ).subscribe({
+            next: (data) => {
+
+                this.getStreams.set(payload.request_id, {
+                    saved_date: Date.now(),
+                    file_data: data,
+                    file_name: payload.file_name,
+                })
+
+                response.next({
+                    file: {
+                        file_size: data.file_size,
+                        metadata: data.metadata,
+                        request_id: payload.request_id,
+                        exists: data.exists
+                    }
+                })
+
+            },
+            complete: () => {
+                response.next({
+                    completed_data: {
+                        request_id: payload.request_id
+                    }
+                })
+            },
+            error: (err) => {
+                response.next(err)
+            },
+        })
+    }
+
+    emitFileChunks(payload: GetRequestStartSendChunks, response: Subject<GetResponse>) {
+        this.logs.debug(`New download chunks request ${payload.request_id}`)
+        const stream = this.getStreams.get(payload.request_id)
+        if (!stream) {
+            response.next({
+                error: {
+                    request_id: payload.request_id,
+                    message: `Cant find get stream ${payload.request_id}. Please first send message GetRequestData and after GetRequestStartSendChunks`,
+                    code: status.ABORTED
+                }
+            })
+            return;
+        }
+
+        const timeoutOperator = () => timer(this.configTimeouts.download)
+            .pipe(
+                switchMap(() => throwError(() => {
+                    this.getStreams.delete(payload.request_id)
+                    return new TimeoutException(`Timeout for download file chunks request_id: ${payload.request_id}, max ${this.configTimeouts.download}ms`)
                 }))
             )
 
 
         // Convert big int to string
         const chunkSize = parseInt(payload.chunk_size.toString())
-        this.memoryStorage.exists(payload.file_name).pipe(
+        this.memoryStorage.exists(stream.file_name).pipe(
             takeUntil(timeoutOperator()),
             mergeMap((memoryExists) => {
                 if (memoryExists) {
                     this.logs.debug('Get file from memory')
                     this.files_memory_downloaded.inc()
-                    return this.memoryStorage.load(payload.file_name, chunkSize)
-                        .pipe(tap(item => this.files_memory_downloaded_bytes.inc(item.content.length)))
+                    return this.memoryStorage.loadChunks(stream.file_name, chunkSize)
+                        .pipe(tap(item => this.files_memory_downloaded_bytes.inc(item.length)))
                 }
                 // Get data from hdd
-                const dataFromStorage = this.diskStorage.load(payload.file_name, chunkSize);
+                const dataFromStorage = this.diskStorage.loadChunks(stream.file_name, chunkSize);
 
                 // Save hdd data in memory
                 const streamToMemory = new Subject<SaveData>()
                 this.memoryStorage.save(streamToMemory.asObservable())
 
+                let firstChunk = true
                 // Copy data from hdd to memory with pipe
                 return dataFromStorage
                     .pipe(
                         takeUntil(timeoutOperator()),
-                        concatMap((val) => {
-                            if (val.exists) {
+                        concatMap((chunkData) => {
+                            if (firstChunk) {
                                 streamToMemory.next({
-                                    file_name: payload.file_name,
-                                    metadata: val.metadata,
-                                    ttl: val.ttl,
-                                    content: val.content
+                                    file_name: stream.file_name,
+                                    metadata: stream.file_data.metadata,
+                                    ttl: stream.file_data.ttl,
+                                    content: chunkData
                                 })
+                                firstChunk = false
                             }
-                            return of(val)
+                            return of(chunkData)
                         }),
                         finalize(() => {
                             streamToMemory.complete()
@@ -307,32 +399,15 @@ export class AppService {
         ).subscribe({
             next: (data) => {
 
-                // Send first chunk with file info
-                const stream = this.getStreams.get(payload.request_id)
-                if (!stream) {
-                    this.getStreams.set(payload.request_id, {
-                        saved_date: Date.now(),
-                    })
-
-                    response.next({
-                        file: {
-                            file_size: data.file_size,
-                            metadata: data.metadata,
-                            request_id: payload.request_id,
-                            exists: data.exists
-                        } as GetResponseFileInfo
-                    })
-                }
-
                 // Stream file bytes
-                if (data.content.length > 0) {
+                if (data.length > 0) {
                     response.next({
                         chunk: {
-                            content: data.content,
+                            content: data,
                             request_id: payload.request_id,
                         } as FileChunk
                     })
-                    this.files_downloaded_bytes.inc(data.content.length)
+                    this.files_downloaded_bytes.inc(data.length)
                 }
 
             },
@@ -341,7 +416,7 @@ export class AppService {
             },
             complete: () => {
                 response.next({
-                    completed: {
+                    completed_chunks: {
                         request_id: payload.request_id
                     }
                 })
@@ -349,7 +424,6 @@ export class AppService {
                 this.files_downloaded.inc()
             }
         })
-
     }
 
 }

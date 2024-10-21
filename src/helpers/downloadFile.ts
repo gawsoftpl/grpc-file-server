@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import {GetResponse, GetResponseFileInfo} from "../interfaces";
+import { GetResponse, GetResponseFileInfo } from "../interfaces";
 
 export const downloadFile = (client: any, downloadKey:string) => {
     return new Promise<{
@@ -15,6 +15,7 @@ export const downloadFile = (client: any, downloadKey:string) => {
         let fileInfo: GetResponseFileInfo
 
         callDownload.on('data', (message: GetResponse) => {
+
             if (message?.file && message.file.request_id == downloadId) {
                 fileInfo = message.file
             }
@@ -23,7 +24,21 @@ export const downloadFile = (client: any, downloadKey:string) => {
                 chunks.push(Buffer.from(message.chunk.content))
             }
 
-            if (message?.completed && message.completed.request_id == downloadId) {
+            if (message?.completed_data && message.completed_data.request_id == downloadId) {
+
+                if (fileInfo.exists) {
+                    callDownload.write({
+                        chunk: {
+                            request_id: downloadId,
+                            chunk_size: 1024
+                        }
+                    })
+                }else{
+                    callDownload.end()
+                }
+            }
+
+            if (message?.completed_chunks && message.completed_chunks.request_id == downloadId) {
                 callDownload.end()
             }
 
@@ -43,9 +58,10 @@ export const downloadFile = (client: any, downloadKey:string) => {
         })
 
         callDownload.write({
-            file_name: downloadKey,
-            request_id: downloadId,
-            chunk_size: 1024
+            file: {
+                file_name: downloadKey,
+                request_id: downloadId,
+            }
         })
     })
 }

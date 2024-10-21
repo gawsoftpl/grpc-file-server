@@ -1,7 +1,7 @@
 import {Injectable, Logger} from "@nestjs/common";
 import { FileMemoryInterface} from "../interfaces/file.interface";
 import {ConfigService} from "@nestjs/config";
-import {Observable, Subject} from "rxjs";
+import {Observable, Subject, timeout} from "rxjs";
 import {RpcException} from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js';
 import {LoadData, SaveData, StorageInterface} from "../interfaces/storage.interface";
@@ -57,7 +57,55 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
         })
     }
 
-    load(fileName: string, chunkSize: number): Observable<LoadData>
+
+    loadChunks(fileName: string, chunkSize: number): Observable<Uint8Array> {
+        return new Observable(observer=> {
+
+            (async() => {
+                let file: FileMemoryInterface;
+                try{
+                    file = this.files.get(fileName);
+                    if (!file || file.data.length == 0) {
+                        observer.complete()
+                        return;
+                    }
+
+                    const timeout = setTimeout(() => {
+                        this.logs.error('Timeout for file lock')
+                        throw new FileLockedException();
+                    }, 5000);
+
+                    while(file.lock) {
+                        await sleep(50)
+                    }
+
+                    if (timeout)
+                        clearTimeout(timeout)
+
+                    const parsedChunkSize = this.getReadChunkSize(chunkSize)
+                    const chunks = Math.ceil(file.data.length / parsedChunkSize)
+                    for(let i= 0;i<chunks; i++) {
+                        const chunkOffset = parsedChunkSize * i;
+                        this.logs.debug(`Load from memory ${fileName} ${parsedChunkSize} bytes `)
+                        observer.next(file.data.subarray(chunkOffset, (chunkOffset + parsedChunkSize)))
+                    }
+
+                    observer.complete()
+
+                } catch(err) {
+                    observer.error(new RpcException({
+                        message: err.message,
+                        code: status.INTERNAL
+                    }))
+                } finally {
+                    if(file)
+                        file.lock = false;
+                }
+            })();
+        })
+    }
+
+    load(fileName: string): Observable<LoadData>
     {
         return new Observable(observer=> {
 
@@ -82,20 +130,12 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                     if (timeout)
                         clearTimeout(timeout)
 
-                    const parsedChunkSize = this.getReadChunkSize(chunkSize)
-                    const chunks = Math.ceil(file.data.length / parsedChunkSize)
-                    for(let i= 0;i<chunks; i++) {
-                        const chunkOffset = parsedChunkSize * i;
-                        this.logs.debug(`Load from memory ${fileName} ${parsedChunkSize} bytes `)
-
-                        observer.next({
-                            exists: true,
-                            file_size: file.data.length,
-                            metadata: file.metadata,
-                            ttl: file.ttl,
-                            content: file.data.subarray(chunkOffset, (chunkOffset + parsedChunkSize))
-                        })
-                    }
+                    observer.next({
+                        exists: true,
+                        file_size: file.data.length,
+                        metadata: file.metadata,
+                        ttl: file.ttl,
+                    })
 
                     observer.complete()
 
@@ -193,4 +233,6 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
     {
         this.max_memory = size
     }
+
+
 }

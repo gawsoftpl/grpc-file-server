@@ -2,7 +2,7 @@ import {Test, TestingModule} from "@nestjs/testing";
 import {ConfigModule, ConfigService} from "@nestjs/config";
 import {Config} from "../config/config";
 import {Observable} from "rxjs";
-import {SaveData} from "../interfaces/storage.interface";
+import {LoadData, SaveData} from "../interfaces/storage.interface";
 import {MemoryStorage} from "./memory.storage";
 import {MetricsModule} from "../metrics/metrics.module";
 
@@ -11,27 +11,40 @@ describe("Test disk storage", () => {
     let memoryStorage: MemoryStorage;
     let module: TestingModule
 
-
-    const read = async(name: string): Promise<{
+    const read = async(name: string): Promise<LoadData & {
         text: string,
         chunks: Array<any>
     }> => {
         return new Promise((resolve) => {
+            let fileData: LoadData = {
+                ttl: 0,
+                exists: false,
+                metadata: "",
+                file_size: 0
+            }
             const fileChunks = []
             memoryStorage.load(
                 name,
-                1024
             )
                 .subscribe({
-                    next: (chunk) => {
-                        fileChunks.push(chunk)
+                    next: (data) => {
+                        fileData = data
                     },
                     complete: () => {
-                        const text = Buffer.concat(fileChunks.map(item => item.content)).toString()
-                        resolve({
-                            text: text,
-                            chunks: fileChunks
-                        })
+                        memoryStorage.loadChunks(name, 1024)
+                            .subscribe({
+                                next: (chunk) => {
+                                    fileChunks.push(chunk)
+                                },
+                                complete: () => {
+                                    const text = Buffer.concat(fileChunks).toString()
+                                    resolve({
+                                        ...fileData,
+                                        text: text,
+                                        chunks: fileChunks
+                                    })
+                                },
+                            })
                     },
                 })
         })
@@ -97,6 +110,9 @@ describe("Test disk storage", () => {
                     // Read 3 times same file
                     const item = await read(name)
                     expect(item.text).toBe('abcabc2abc3')
+                    expect(item.file_size).toBe(11)
+                    expect(item.metadata).toBe(metadata)
+                    expect(item.exists).toBe(true)
                     expect((await read(name)).text).toBe('abcabc2abc3')
                     expect((await read(name)).text).toBe('abcabc2abc3')
                     done()

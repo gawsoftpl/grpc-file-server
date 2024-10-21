@@ -35,7 +35,6 @@ export abstract class StorageAbstract extends EventEmitter {
     protected fileNoExistsResponse(subscriber: Subscriber<LoadData>) {
         subscriber.next({
             exists: false,
-            content: new Uint8Array(),
             file_size: 0,
             metadata: "",
             ttl: 0,

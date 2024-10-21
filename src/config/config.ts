@@ -30,6 +30,8 @@ export const Config = {
     garbageCollection: {
         interval: parseInt(process.env.GARBAGE_COLLECTION_INTERVAL || "60"), // in sec
         upload_register_max_time: parseInt(process.env.GARBAGE_COLLECTION_UPLOAD_REGISTER_MAX_TTL || "120"), // in sec
+        download_register_max_time: parseInt(process.env.GARBAGE_COLLECTION_DOWNLOAD_REGISTER_MAX_TTL || "120"), // in sec
+
     },
     grpc: {
         listen: process.env.HOST || "0.0.0.0:3000"

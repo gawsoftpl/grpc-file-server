@@ -35,14 +35,14 @@ export class HealthzController implements BeforeApplicationShutdown {
 
      async beforeApplicationShutdown(): Promise<void>
      {
-    //     return new Promise<void>((resolve) => {
-    //         this.shutdownSignal = true
-    //         this.logs.log('Received application shutdown signal. Wait 30s for close all operations')
-    //         setTimeout(() => {
-    //             this.logs.log('Closing app')
-    //             resolve()
-    //         }, 30_000)
-    //     })
+        return new Promise<void>((resolve) => {
+            this.shutdownSignal = true
+            this.logs.log('Received application shutdown signal. Wait 30s for close all operations')
+            setTimeout(() => {
+                this.logs.log('Closing app')
+                resolve()
+            }, 30_000)
+        })
      }
 
 }

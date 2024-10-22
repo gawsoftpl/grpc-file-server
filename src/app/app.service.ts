@@ -293,11 +293,13 @@ export class AppService {
         ).subscribe({
             next: (data) => {
 
-                this.getStreams.set(payload.request_id, {
-                    saved_date: Date.now(),
-                    file_data: data,
-                    file_name: payload.file_name,
-                })
+                if (data.exists){
+                    this.getStreams.set(payload.request_id, {
+                        saved_date: Date.now(),
+                        file_data: data,
+                        file_name: payload.file_name,
+                    })
+                }
 
                 response.next({
                     file: {

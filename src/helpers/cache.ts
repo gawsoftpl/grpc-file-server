@@ -4,6 +4,7 @@ import {FileInterface} from "../interfaces/file.interface";
 
 interface CacheOptions {
     maxMemory: number,
+    maxTtl: number,
 }
 
 // Define a type map for events
@@ -65,9 +66,11 @@ export class Cache<K, V extends FileInterface, FC=any> extends TypedEventEmitter
         if (this.timers.has(key)) {
             clearTimeout(this.timers.get(key))
         }
+
+        const parsedTtl = Math.min(ttl, this.options.maxTtl)
         this.timers.set(
             key,
-            setTimeout(() => this.delete(key), ttl * 1000)
+            setTimeout(() => this.delete(key), parsedTtl * 1000)
         )
         this.data.set(key, value, {
             noDisposeOnSet: true

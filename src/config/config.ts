@@ -14,6 +14,8 @@ export const Config = {
             // Default ttl per second
             ttl: parseInt(process.env.STORAGE_MEMORY_TTL || '600'),
 
+            max_ttl: parseInt(process.env.STORAGE_MEMORY_MAX_TTL || '604800'), // 7 days
+
         },
         disk: {
             // Setup max memory in bytes, default 128MB
@@ -24,6 +26,8 @@ export const Config = {
 
             // ttl in seconds
             ttl: parseInt(process.env.STORAGE_DISK_TTL || '600'),
+
+            max_ttl: parseInt(process.env.STORAGE_DISK_MAX_TTL || '604800'), // 7 days
 
         }
     },

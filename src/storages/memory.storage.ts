@@ -36,7 +36,8 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
         this.defaultTtlSec = configService.get('storages.memory.ttl')
 
         this.files = new Cache({
-            maxMemory: this.max_memory
+            maxMemory: this.max_memory,
+            maxTtl: configService.get('storages.disk.max_ttl'),
         })
 
         this.files.on('remove', (file, key) => {

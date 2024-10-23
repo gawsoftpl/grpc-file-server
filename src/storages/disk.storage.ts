@@ -57,7 +57,8 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         this.totalMemorySize = 0;
 
         this.files = new Cache({
-            maxMemory: this.maxMemory
+            maxMemory: this.maxMemory,
+            maxTtl: configService.get('storages.disk.max_ttl'),
         })
 
         this.files.on('remove', (item, keyName, reason) => {

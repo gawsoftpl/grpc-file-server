@@ -371,7 +371,6 @@ export class AppService {
                     .pipe(
                         takeUntil(timeoutOperator()),
                         concatMap((chunkData) => {
-                            console.log("COPY TO MEMORY", stream.file_data.ttl)
                             if (firstChunk) {
                                 streamToMemory.next({
                                     file_name: stream.file_name,

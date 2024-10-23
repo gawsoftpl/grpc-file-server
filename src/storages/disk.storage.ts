@@ -258,7 +258,6 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                                         save_date: Date.now() / 1000,
                                         lock: false
                                     }
-                                    console.log("disk", fileInfo.ttl)
                                     this.files.set(
                                         fileInfo.fileName,
                                         filePayload,

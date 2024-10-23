@@ -186,7 +186,6 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
                 }
 
                 const fullFile = Buffer.concat(buffers);
-                console.log("memory", fileInfo.ttl)
                 this.files.set(fileInfo.file_name, {
                     data: fullFile,
                     ttl: fileInfo.ttl,

@@ -1,0 +1,16 @@
+target:
+  #path: deployment/apiserver/container/apiserver
+  path: statefulset/grpc-file-server
+  namespace: webshotapi
+agent:
+  namespace: webshotapi
+feature:
+  network:
+    outgoing:
+      ignore_localhost: false
+    incoming:
+      mode: steal
+      ignore_localhost: true
+      #port_mapping: [[3000, 3000]]
+  #env:
+  #  include: "*"

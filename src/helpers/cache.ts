@@ -59,7 +59,7 @@ export class Cache<K, V extends FileInterface, FC=any> extends TypedEventEmitter
      * Set data to cache
      * @param key
      * @param value
-     * @param ttl
+     * @param ttl - time to live in miliseconds
      */
     set(key: K, value: V, ttl : number)  {
         if (this.timers.has(key)) {
@@ -67,7 +67,7 @@ export class Cache<K, V extends FileInterface, FC=any> extends TypedEventEmitter
         }
         this.timers.set(
             key,
-            setTimeout(() => this.delete(key), ttl)
+            setTimeout(() => this.delete(key), ttl * 1000)
         )
         this.data.set(key, value, {
             noDisposeOnSet: true

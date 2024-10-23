@@ -254,13 +254,14 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                                             bin: fileInfo.filePaths.bin.replace('.tmp',''),
                                             metadata: fileInfo.filePaths.metadata.replace('.tmp',''),
                                         },
-                                        save_date: Date.now(),
+                                        save_date: Date.now() / 1000,
                                         lock: false
                                     }
+                                    console.log("disk", fileInfo.ttl)
                                     this.files.set(
                                         fileInfo.fileName,
                                         filePayload,
-                                        fileInfo.ttl * 1000
+                                        fileInfo.ttl
                                     )
                                     this.logs.debug(`Save file ${fileInfo.fileName} ${Math.round(fileInfo?.fileSize ?? 0) / 1024} KB on hdd`)
                                     this.emit('new_item', fileInfo.fileName, filePayload)
@@ -501,12 +502,12 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                             ttl: ttl,
                             metadata: metadata.metadata,
                             lock: false,
-                            save_date: stats.mtime.getTime(),
+                            save_date: stats.mtime.getTime() / 1000,
                             filePaths: {
                                 metadata: fullPath,
                                 bin: binPath
                             }
-                        }, ttl * 1000)
+                        }, ttl)
                     }catch(err){
                         this.logs.error(err)
                     }

@@ -18,6 +18,7 @@ export class AppController {
 
     @GrpcStreamMethod('FileServerService', 'GetFile')
     GetFile(data: Observable<GetRequest>): Observable<GetResponse> {
+        this.logs.log(`Connected with new client for get`)
         const subject = new Subject<GetResponse>()
 
         data.subscribe({
@@ -34,6 +35,7 @@ export class AppController {
 
     @GrpcStreamMethod('FileServerService', 'Upload')
     upload(data: Observable<UploadRequest>): Observable<UploadResponse> {
+        this.logs.log(`Connected with new client for upload`)
         const subject = new Subject<UploadResponse>()
 
         const onComplete = () => subject.complete();

@@ -1,6 +1,6 @@
 {
   "name": "grpc-file-server",
-  "version": "0.1.2-alpha",
+  "version": "0.1.2-beta",
   "description": "Grpc file server",
   "author": "gawsoft.com",
   "main": "dist/index.js",

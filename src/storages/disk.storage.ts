@@ -136,7 +136,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
 
                     let chunkIndex = 0;
-                    stream.on('data', (chunk) => {
+                    stream.on('data', (chunk: Buffer) => {
                         this.logs.debug(`Load ${fileName} ${chunk.length} bytes from disk of data.`);
                         subscriber.next(new Uint8Array(Buffer.from(chunk)))
                         chunkIndex++;

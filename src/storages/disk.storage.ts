@@ -479,7 +479,8 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
     protected indexHddFiles(): Promise<void>
     {
         const traverseDirectory = async(currentDir) => {
-            const entries = await Fs.readdir(currentDir, { withFileTypes: true });
+            const entries = (await Fs.readdir(currentDir, { withFileTypes: true }))
+                .filter(fn => !['lost+found'].includes(fn.name))
 
             for (const entry of entries) {
                 const fullPath = path.join(currentDir, entry.name);

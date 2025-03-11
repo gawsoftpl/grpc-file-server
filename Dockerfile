@@ -1,4 +1,4 @@
-FROM node:20-alpine as builder
+FROM node:22-alpine AS builder
 
 WORKDIR /project
 
@@ -14,7 +14,7 @@ RUN npm run build
 
 USER node
 
-FROM node:20-alpine as deploy
+FROM node:22-alpine AS deploy
 
 # Download GRPC healthcheck
 RUN GRPC_HEALTH_PROBE_VERSION=v0.4.34  \

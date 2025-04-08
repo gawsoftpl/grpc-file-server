@@ -1,4 +1,4 @@
-import { Transport, ClientOptions } from '@nestjs/microservices';
+import { Transport, GrpcOptions } from '@nestjs/microservices';
 import { join } from 'path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +10,7 @@ export class GrpcClientOptions {
     constructor(private configService: ConfigService) {
     }
 
-    getOptions(): ClientOptions {
+    getOptions(): GrpcOptions {
         return {
             transport: Transport.GRPC,
             options: {

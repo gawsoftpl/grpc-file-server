@@ -42,7 +42,6 @@
     "@nestjs/terminus": "^11.0.0",
     "@willsoto/nestjs-prometheus": "^6.0.2",
     "dotenv": "^17.2.3",
-    "multer": "3.0.0-alpha.1",
     "google-protobuf": "^4.0.0",
     "lru-cache": "^11.2.2",
     "prom-client": "^15.1.3",
@@ -54,7 +53,7 @@
     "@nestjs/schematics": "^11.0.9",
     "@nestjs/testing": "^11.1.9",
     "@types/express": "^5.0.5",
-    "@types/jest": "^30.0.0",
+    "@types/jest": "^30.0.0"
     "@types/node": "^24",
     "glob": "^13.0.1",
     "@types/supertest": "^6.0.3",

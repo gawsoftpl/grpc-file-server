@@ -5,7 +5,7 @@ import {GrpcClientOptions} from "./grpc/grpc.options";
 import {ConfigService} from "@nestjs/config";
 import {MetricsModule} from "./metrics/metrics.module";
 import {ExpressAdapter} from "@nestjs/platform-express";
-import * as express from 'express';
+import express from 'express';
 import {Config} from "./config/config";
 
 export async function bootstrap() {

@@ -1,5 +1,5 @@
 import {LRUCache } from "lru-cache";
-import * as EventEmitter from 'events'
+import {EventEmitter} from 'events'
 import {FileInterface} from "../interfaces/file.interface";
 
 interface CacheOptions {

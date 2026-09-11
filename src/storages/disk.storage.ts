@@ -1,9 +1,9 @@
 import { Injectable, Logger, OnModuleInit } from "@nestjs/common";
 import { LoadData, SaveData, StorageInterface } from "../interfaces/storage.interface";
-import {concatMap, from, Observable, of, Subject, Subscriber} from "rxjs";
+import {concatMap, from, Observable, of, Subject } from "rxjs";
 import { ConfigService } from "@nestjs/config";
 import * as Fs from 'fs/promises'
-import { existsSync, statSync, ReadStream, mkdirSync, Stats, createWriteStream, WriteStream, createReadStream } from 'fs'
+import { existsSync, ReadStream, mkdirSync, Stats, createWriteStream, WriteStream, createReadStream } from 'fs'
 import * as path from 'path'
 import { RpcException } from "@nestjs/microservices";
 import { status } from '@grpc/grpc-js'
@@ -136,7 +136,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
 
 
                     let chunkIndex = 0;
-                    stream.on('data', (chunk: Buffer) => {
+                    stream.on('data', (chunk) => {
                         this.logs.debug(`Load ${fileName} ${chunk.length} bytes from disk of data.`);
                         subscriber.next(new Uint8Array(Buffer.from(chunk)))
                         chunkIndex++;
@@ -151,7 +151,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                         subscriber.error(err)
                     });
 
-                }catch (error){
+                }catch (error: any){
                     subscriber.error(new RpcException({
                         message: error.message,
                         code: status.INVALID_ARGUMENT
@@ -295,7 +295,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                     subscriber.next(exists)
                     subscriber.complete()
                 })()
-            }catch(err){
+            }catch(err: any){
                 this.logs.debug(err?.message)
                 subscriber.error(err)
             }
@@ -357,7 +357,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
                             removedFiles++
 
                             this.logs.debug(`Deleted expired tmp file: ${fullPath} and metadata: ${metadataFilePath}`);
-                        } catch (error) {
+                        } catch (error: any) {
                             this.logs.error(`Error deleting tmp file or metadata: ${error.message}`);
                         }
                     }
@@ -369,7 +369,7 @@ export class DiskStorage extends StorageAbstract implements StorageInterface, On
         try {
             await traverseDirectory(this.dirPath);
             this.logs.debug(`Garbage collection completed. Removed items: ${removedFiles}`);
-        } catch (error) {
+        } catch (error: any) {
             this.logs.error(`Error during garbage collection: ${error.message}`);
         }
     }

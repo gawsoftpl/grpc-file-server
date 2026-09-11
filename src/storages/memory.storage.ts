@@ -93,7 +93,7 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
                     observer.complete()
 
-                } catch(err) {
+                } catch(err: any) {
                     observer.error(new RpcException({
                         message: err.message,
                         code: status.INTERNAL
@@ -140,7 +140,7 @@ export class MemoryStorage extends StorageAbstract implements StorageInterface {
 
                     observer.complete()
 
-                } catch(err) {
+                } catch(err: any) {
                     observer.error(new RpcException({
                         message: err.message,
                         code: status.INTERNAL
